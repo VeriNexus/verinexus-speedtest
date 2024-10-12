@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Update check script version
-UPDATE_CHECK_VERSION="1.0.2"
+UPDATE_CHECK_VERSION="1.0.3"
 
 # Initialize version variables for other scripts
 LATEST_MAIN_VERSION=""
@@ -14,16 +14,14 @@ LATEST_UTILS_VERSION=""
 check_for_updates() {
     echo -e "${CYAN}Checking for updates...${NC}"
 
-    # Download the latest version of each component and check versions
-    # Check version for each script, e.g., error_handler.sh, utils.sh, etc.
-
+    # Fetch the latest version for each component from the local scripts
     LATEST_MAIN_VERSION=$(grep 'SCRIPT_VERSION' ./speedtest.sh | cut -d'=' -f2 | tr -d '"')
     LATEST_ERROR_HANDLER_VERSION=$(grep 'ERROR_HANDLER_VERSION' ./error_handler.sh | cut -d'=' -f2 | tr -d '"')
     LATEST_UPDATE_CHECK_VERSION=$(grep 'UPDATE_CHECK_VERSION' ./update_check.sh | cut -d'=' -f2 | tr -d '"')
     LATEST_RUN_SPEEDTEST_VERSION=$(grep 'RUN_SPEEDTEST_VERSION' ./run_speedtest.sh | cut -d'=' -f2 | tr -d '"')
     LATEST_UTILS_VERSION=$(grep 'UTILS_VERSION' ./utils.sh | cut -d'=' -f2 | tr -d '"')
 
-    # Compare and display messages if updates are needed
+    # Compare versions and inform if an update is available for any component
     if [[ "$SCRIPT_VERSION" != "$LATEST_MAIN_VERSION" ]]; then
         echo -e "${YELLOW}Update available for main script: $LATEST_MAIN_VERSION${NC}"
     fi
