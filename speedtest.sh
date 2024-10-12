@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Main script version
-SCRIPT_VERSION="1.0.2"
+SCRIPT_VERSION="1.0.3"
 
 # Load other scripts
 source ./error_handler.sh
