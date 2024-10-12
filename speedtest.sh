@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.3.7"
+SCRIPT_VERSION="1.3.8"
 
 # GitHub repository raw URL for the script
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -105,12 +105,18 @@ else
 fi
 
 # Step 2: Fetching Date and Time
+echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}│${NC}  Step 2: Fetching Date and Time  ${CYAN}│${NC}"
+echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 TIMESTAMP=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $4}')
 DATE=$(echo "$TIMESTAMP" | cut -d'T' -f1)
 TIME=$(echo "$TIMESTAMP" | cut -d'T' -f2 | cut -d'.' -f1)
 echo -e "${CHECKMARK} Date: ${YELLOW}$DATE${NC}, Time: ${YELLOW}$TIME${NC}"
 
 # Step 3: Fetching Private/Public IPs
+echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}│${NC}  Step 3: Fetching Private/Public IPs  ${CYAN}│${NC}"
+echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 PRIVATE_IP=$(hostname -I | awk '{print $1}')
 PUBLIC_IP=$(curl -s ifconfig.co)
 echo -e "${CHECKMARK} Private IP: ${YELLOW}$PRIVATE_IP${NC}, Public IP: ${YELLOW}$PUBLIC_IP${NC}"
@@ -128,11 +134,17 @@ else
 fi
 
 # Step 5: Converting Speed Results
+echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}│${NC}  Step 5: Converting Speed Results  ${CYAN}│${NC}"
+echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $7 / 1000000}')
 UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $8 / 1000000}')
 echo -e "${CHECKMARK} Download Speed: ${GREEN}$DOWNLOAD_SPEED Mbps${NC}, Upload Speed: ${GREEN}$UPLOAD_SPEED Mbps${NC}"
 
 # Step 6: Extracting Shareable ID
+echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}│${NC}  Step 6: Extracting Shareable ID  ${CYAN}│${NC}"
+echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
 SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
 echo -e "${CHECKMARK} Shareable ID: ${YELLOW}$SHARE_ID${NC}"
