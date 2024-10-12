@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.3.8"
+SCRIPT_VERSION="1.3.9"
 
 # GitHub repository raw URL for the script
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -104,14 +104,15 @@ else
     exit 1
 fi
 
-# Step 2: Fetching Date and Time
+# Step 2: Fetching Date and Time (UK Time - GMT/BST)
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│${NC}  Step 2: Fetching Date and Time  ${CYAN}│${NC}"
+echo -e "${CYAN}│${NC}  Step 2: Fetching Date and Time (UK Time)  ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
-TIMESTAMP=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $4}')
-DATE=$(echo "$TIMESTAMP" | cut -d'T' -f1)
-TIME=$(echo "$TIMESTAMP" | cut -d'T' -f2 | cut -d'.' -f1)
-echo -e "${CHECKMARK} Date: ${YELLOW}$DATE${NC}, Time: ${YELLOW}$TIME${NC}"
+
+# Use TZ environment variable to fetch time in Europe/London timezone
+UK_DATE=$(TZ="Europe/London" date +"%Y-%m-%d")
+UK_TIME=$(TZ="Europe/London" date +"%H:%M:%S")
+echo -e "${CHECKMARK} Date (UK): ${YELLOW}$UK_DATE${NC}, Time (UK): ${YELLOW}$UK_TIME${NC}"
 
 # Step 3: Fetching Private/Public IPs
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
@@ -154,7 +155,7 @@ echo -e "${CYAN}┌────────────────────�
 echo -e "${CYAN}│${NC}  Step 7: Saving Results  ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
-SPEEDTEST_OUTPUT=$(echo "$SPEEDTEST_OUTPUT" | awk -F, -v date="$DATE" -v time="$TIME" -v down="$DOWNLOAD_SPEED" -v up="$UPLOAD_SPEED" -v host="$HOSTNAME" -v mac="$MAC_ADDRESS" -v priv_ip="$PRIVATE_IP" -v pub_ip="$PUBLIC_IP" -v version="$SCRIPT_VERSION" -v share_id="$SHARE_ID" '{OFS=","; print $1, $2, $3, date, time, $6, down, up, share_id, priv_ip, pub_ip, host, mac, version}')
+SPEEDTEST_OUTPUT=$(echo "$SPEEDTEST_OUTPUT" | awk -F, -v date="$UK_DATE" -v time="$UK_TIME" -v down="$DOWNLOAD_SPEED" -v up="$UPLOAD_SPEED" -v host="$HOSTNAME" -v mac="$MAC_ADDRESS" -v priv_ip="$PRIVATE_IP" -v pub_ip="$PUBLIC_IP" -v version="$SCRIPT_VERSION" -v share_id="$SHARE_ID" '{OFS=","; print $1, $2, $3, date, time, $6, down, up, share_id, priv_ip, pub_ip, host, mac, version}')
 
 # Run the SSH command (Password not shown in output)
 echo -e "${BLUE}Running SSH command...${NC}"
