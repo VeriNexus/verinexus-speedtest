@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Main script version
-SCRIPT_VERSION="1.0.1"
+SCRIPT_VERSION="1.0.2"
 
 # Load other scripts
 source ./error_handler.sh
@@ -32,6 +32,16 @@ progress_bar() {
 
 # Check for script updates
 check_for_updates
+
+# Display versions for all components
+echo -e "${CYAN}====================================================${NC}"
+echo -e "${BOLD}VeriNexus Speed Test Component Versions${NC}"
+echo -e "Main Script: ${YELLOW}$SCRIPT_VERSION${NC} (Current) | ${YELLOW}$LATEST_MAIN_VERSION${NC} (Latest)"
+echo -e "Error Handler: ${YELLOW}$ERROR_HANDLER_VERSION${NC} (Current) | ${YELLOW}$LATEST_ERROR_HANDLER_VERSION${NC} (Latest)"
+echo -e "Update Check: ${YELLOW}$UPDATE_CHECK_VERSION${NC} (Current) | ${YELLOW}$LATEST_UPDATE_CHECK_VERSION${NC} (Latest)"
+echo -e "Run Speed Test: ${YELLOW}$RUN_SPEEDTEST_VERSION${NC} (Current) | ${YELLOW}$LATEST_RUN_SPEEDTEST_VERSION${NC} (Latest)"
+echo -e "Utilities: ${YELLOW}$UTILS_VERSION${NC} (Current) | ${YELLOW}$LATEST_UTILS_VERSION${NC} (Latest)"
+echo -e "${CYAN}====================================================${NC}"
 
 # Apply any forced errors
 apply_forced_errors
