@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.4.2"
+SCRIPT_VERSION="1.5.0"
 
 # GitHub repository raw URL for the script
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -13,6 +13,7 @@ TEMP_SCRIPT="/tmp/latest_speedtest.sh"
 REMOTE_USER="root"                 
 REMOTE_HOST="88.208.225.250"       
 REMOTE_PATH="/speedtest/results/speedtest_results.csv"  
+ERROR_LOG_PATH="/speedtest/results/error.txt"
 REMOTE_PASS='**@p3F_1$t'           
 
 # ANSI Color Codes
@@ -27,6 +28,37 @@ BOLD='\033[1m'
 # Symbols
 CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
+
+# Function to log errors and upload to the remote server
+log_error() {
+    local error_message="$1"
+
+    # Get machine details
+    HOSTNAME=$(hostname)
+    PRIVATE_IP=$(hostname -I | awk '{print $1}')
+    PUBLIC_IP=$(curl -s ifconfig.co)
+
+    # Get timestamp
+    ERROR_TIMESTAMP=$(TZ="Europe/London" date +"%Y-%m-%d %H:%M:%S")
+
+    # Construct the error log entry
+    ERROR_LOG="===============================\n"
+    ERROR_LOG+="Timestamp: $ERROR_TIMESTAMP\n"
+    ERROR_LOG+="Script Version: $SCRIPT_VERSION\n"
+    ERROR_LOG+="Hostname: $HOSTNAME\n"
+    ERROR_LOG+="Private IP: $PRIVATE_IP\n"
+    ERROR_LOG+="Public IP: $PUBLIC_IP\n"
+    ERROR_LOG+="Error: $error_message\n"
+    ERROR_LOG+="===============================\n"
+
+    # Append error to a local file for reference
+    echo -e "$ERROR_LOG" >> error_local.log
+
+    # Send the error log to the remote server
+    echo -e "$ERROR_LOG" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "cat >> $ERROR_LOG_PATH"
+
+    echo -e "${CROSS} ${RED}Error logged and sent to remote server.${NC}"
+}
 
 # Function to compare versions
 version_gt() { 
@@ -49,20 +81,20 @@ check_for_updates() {
          -s -o "$TEMP_SCRIPT" "$REPO_RAW_URL"
 
     if [ $? -ne 0 ]; then
-        echo -e "${CROSS} ${RED}Error: Failed to download the script.${NC}"
+        log_error "Failed to download the script from GitHub."
         exit 1
     fi
 
     # Ensure the downloaded file is valid
     if [ ! -s "$TEMP_SCRIPT" ]; then
-        echo -e "${CROSS} ${RED}Error: Downloaded file is empty.${NC}"
+        log_error "Downloaded script is empty."
         exit 1
     fi
 
     # Extract version from the downloaded script
     LATEST_VERSION=$(grep -oP 'SCRIPT_VERSION="\K[0-9.]+' "$TEMP_SCRIPT")
     if [ -z "$LATEST_VERSION" ]; then
-        echo -e "${CROSS} ${RED}Error: Failed to fetch the latest version.${NC}"
+        log_error "Failed to extract version from the downloaded script."
         exit 1
     fi
 
@@ -98,6 +130,7 @@ run_speed_test() {
             sleep 5  # Wait before retrying
         fi
     done
+    log_error "Speed Test failed after $max_attempts attempts."
     return 1  # Fail if all attempts failed
 }
 
@@ -161,7 +194,8 @@ if [ -n "$ACTIVE_IFACE" ]; then
     MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
     echo -e "${CHECKMARK} Active Interface: ${YELLOW}$ACTIVE_IFACE${NC}, MAC Address: ${YELLOW}$MAC_ADDRESS${NC}"
 else
-    echo -e "${CROSS} Error: Could not determine active interface."
+    log_error "Could not determine active network interface."
+    exit 1
 fi
 
 # Step 5: Converting Speed Results
@@ -194,7 +228,7 @@ echo "$SPEEDTEST_OUTPUT" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyCheckin
 if [ $? -eq 0 ]; then
     echo -e "${CHECKMARK} Results saved to the remote server."
 else
-    echo -e "${CROSS} Error: Failed to save results to the remote server."
+    log_error "Failed to save results to the remote server."
 fi
 
 # Footer
