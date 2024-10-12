@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.4.0"
+SCRIPT_VERSION="1.4.2"
 
 # GitHub repository raw URL for the script
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -28,7 +28,12 @@ BOLD='\033[1m'
 CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
 
-# Function to check for updates with cache control
+# Function to compare versions
+version_gt() { 
+    [ "$(printf '%s\n' "$@" | sort -V | head -n 1)" != "$1" ] 
+}
+
+# Function to check for updates with cache control and version check
 check_for_updates() {
     echo -e "${CYAN}====================================================${NC}"
     echo -e "           ${BOLD}Checking for Script Updates...${NC}"
@@ -63,17 +68,37 @@ check_for_updates() {
 
     echo -e "${CHECKMARK} Current version: $SCRIPT_VERSION, Latest version: $LATEST_VERSION"
 
-    # Compare versions
-    if [ "$LATEST_VERSION" != "$SCRIPT_VERSION" ]; then
+    # Compare versions to check if we should upgrade
+    if version_gt "$LATEST_VERSION" "$SCRIPT_VERSION"; then
         echo -e "${YELLOW}New version available: $LATEST_VERSION${NC}"
         cp "$TEMP_SCRIPT" "$0"
         chmod +x "$0"
-        echo -e "${CHECKMARK} Update downloaded. Please re-run the script."
+        echo -e "${CHECKMARK} Update downloaded to version $LATEST_VERSION. Please re-run the script."
         exit 0
+    else
+        echo -e "${CHECKMARK} No update needed. You are using the latest version or a higher one."
     fi
 
-    echo -e "${CHECKMARK} You are using the latest version."
     echo -e "${CYAN}====================================================${NC}"
+}
+
+# Retry function to retry the speed test in case of failure
+run_speed_test() {
+    local attempts=0
+    local max_attempts=3
+    while [ $attempts -lt $max_attempts ]; do
+        echo -e "${BLUE}Attempting speed test (Attempt $((attempts+1)) of $max_attempts)...${NC}"
+        SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
+        if [ $? -eq 0 ]; then
+            echo -e "${CHECKMARK} Speed Test completed successfully."
+            return 0
+        else
+            echo -e "${CROSS} ${RED}Speed Test failed.${NC}"
+            attempts=$((attempts+1))
+            sleep 5  # Wait before retrying
+        fi
+    done
+    return 1  # Fail if all attempts failed
 }
 
 # Call the update check function
@@ -99,15 +124,13 @@ progress_bar() {
 echo -e "${BLUE}${BOLD}Starting VeriNexus Speed Test...${NC}"
 progress_bar
 
-# Step 1: Running Speed Test
+# Step 1: Running Speed Test with retry logic
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
 echo -e "${CYAN}│${NC}  Step 1: Running Speed Test  ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
-SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
-if [ $? -eq 0 ]; then
-    echo -e "${CHECKMARK} Speed Test completed successfully."
-else
-    echo -e "${CROSS} Error: Speed Test failed."
+
+if ! run_speed_test; then
+    echo -e "${CROSS} ${RED}Error: Speed Test failed after multiple attempts. Please check your internet connection and try again later.${NC}"
     exit 1
 fi
 
