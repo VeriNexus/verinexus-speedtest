@@ -1,15 +1,16 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.6.0"
+SCRIPT_VERSION="1.7.0"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
-FORCED_ERROR_URL="https://raw.githubusercontent.com/Verinexus/verinexus-speedtest/main/force_error.txt"
+FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
 
 # Temporary files for comparison and forced error
 TEMP_SCRIPT="/tmp/latest_speedtest.sh"
 FORCED_ERROR_FILE="/tmp/force_error.txt"
+ERROR_LOG=""
 
 # SSH connection details (No password shown in the output)
 REMOTE_USER="root"                 
@@ -31,51 +32,29 @@ BOLD='\033[1m'
 CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
 
-# Function to log errors and upload to the remote server
+# Function to log errors without stopping the script
 log_error() {
     local error_message="$1"
-
-    # Get machine details
-    HOSTNAME=$(hostname)
-    PRIVATE_IP=$(hostname -I | awk '{print $1}')
-    PUBLIC_IP=$(curl -s ifconfig.co)
-
-    # Get timestamp
-    ERROR_TIMESTAMP=$(TZ="Europe/London" date +"%Y-%m-%d %H:%M:%S")
-
-    # Construct the error log entry
-    ERROR_LOG="===============================\n"
-    ERROR_LOG+="Timestamp: $ERROR_TIMESTAMP\n"
+    ERROR_LOG+="===============================\n"
+    ERROR_LOG+="Timestamp: $(TZ='Europe/London' date +"%Y-%m-%d %H:%M:%S")\n"
     ERROR_LOG+="Script Version: $SCRIPT_VERSION\n"
-    ERROR_LOG+="Hostname: $HOSTNAME\n"
-    ERROR_LOG+="Private IP: $PRIVATE_IP\n"
-    ERROR_LOG+="Public IP: $PUBLIC_IP\n"
+    ERROR_LOG+="Hostname: $(hostname)\n"
+    ERROR_LOG+="Private IP: $(hostname -I | awk '{print $1}')\n"
+    ERROR_LOG+="Public IP: $(curl -s ifconfig.co)\n"
     ERROR_LOG+="Error: $error_message\n"
     ERROR_LOG+="===============================\n"
-
-    # Append error to a local file for reference
-    echo -e "$ERROR_LOG" >> error_local.log
-
-    # Send the error log to the remote server
-    echo -e "$ERROR_LOG" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "cat >> $ERROR_LOG_PATH"
-
-    echo -e "${CROSS} ${RED}Error logged and sent to remote server.${NC}"
+    echo -e "${CROSS} ${RED}Error: $error_message${NC}"
 }
 
-# Function to check for forced error file and execute its contents
-check_forced_error() {
+# Function to check for forced error file and apply its effects
+apply_forced_errors() {
     # Download the forced error file if it exists in the GitHub repository
     curl -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
-
+    
     # Check if the forced error file was successfully downloaded
     if [ -s "$FORCED_ERROR_FILE" ]; then
-        echo -e "${RED}Forced error file found. Executing error simulation...${NC}"
-        # Execute the contents of the forced error file
+        echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
         source "$FORCED_ERROR_FILE"
-        if [ $? -ne 0 ]; then
-            log_error "Simulated error from executing force_error.txt."
-            exit 1
-        fi
     else
         # If the forced error file was previously downloaded but no longer exists in the repo, remove it
         if [ -f "$FORCED_ERROR_FILE" ]; then
@@ -107,20 +86,20 @@ check_for_updates() {
 
     if [ $? -ne 0 ]; then
         log_error "Failed to download the script from GitHub."
-        exit 1
+        return 1
     fi
 
     # Ensure the downloaded file is valid
     if [ ! -s "$TEMP_SCRIPT" ]; then
         log_error "Downloaded script is empty."
-        exit 1
+        return 1
     fi
 
     # Extract version from the downloaded script
     LATEST_VERSION=$(grep -oP 'SCRIPT_VERSION="\K[0-9.]+' "$TEMP_SCRIPT")
     if [ -z "$LATEST_VERSION" ]; then
         log_error "Failed to extract version from the downloaded script."
-        exit 1
+        return 1
     fi
 
     echo -e "${CHECKMARK} Current version: $SCRIPT_VERSION, Latest version: $LATEST_VERSION"
@@ -150,17 +129,16 @@ run_speed_test() {
             echo -e "${CHECKMARK} Speed Test completed successfully."
             return 0
         else
-            echo -e "${CROSS} ${RED}Speed Test failed.${NC}"
+            log_error "Speed Test failed on attempt $((attempts+1))."
             attempts=$((attempts+1))
             sleep 5  # Wait before retrying
         fi
     done
-    log_error "Speed Test failed after $max_attempts attempts."
     return 1  # Fail if all attempts failed
 }
 
 # Check for forced errors before running the rest of the script
-check_forced_error
+apply_forced_errors
 
 # Call the update check function
 check_for_updates
@@ -191,8 +169,7 @@ echo -e "${CYAN}│${NC}  Step 1: Running Speed Test  ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
 if ! run_speed_test; then
-    echo -e "${CROSS} ${RED}Error: Speed Test failed after multiple attempts. Please check your internet connection and try again later.${NC}"
-    exit 1
+    log_error "Speed Test failed after multiple attempts."
 fi
 
 # Step 2: Fetching Date and Time (UK Time - GMT/BST)
@@ -200,7 +177,6 @@ echo -e "${CYAN}┌────────────────────�
 echo -e "${CYAN}│${NC}  Step 2: Fetching Date and Time (UK Time)  ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
-# Use TZ environment variable to fetch time in Europe/London timezone
 UK_DATE=$(TZ="Europe/London" date +"%Y-%m-%d")
 UK_TIME=$(TZ="Europe/London" date +"%H:%M:%S")
 echo -e "${CHECKMARK} Date (UK): ${YELLOW}$UK_DATE${NC}, Time (UK): ${YELLOW}$UK_TIME${NC}"
@@ -210,27 +186,45 @@ echo -e "${CYAN}┌────────────────────�
 echo -e "${CYAN}│${NC}  Step 3: Fetching Private/Public IPs  ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
-PRIVATE_IP=$(hostname -I | awk '{print $1}')
-PUBLIC_IP=$(curl -s ifconfig.co)
+if [ "$FORCE_FAIL_PRIVATE_IP" = true ]; then
+    log_error "Forced failure to fetch Private IP."
+    PRIVATE_IP="N/A"
+else
+    PRIVATE_IP=$(hostname -I | awk '{print $1}')
+fi
+
+if [ "$FORCE_FAIL_PUBLIC_IP" = true ]; then
+    log_error "Forced failure to fetch Public IP."
+    PUBLIC_IP="N/A"
+else
+    PUBLIC_IP=$(curl -s ifconfig.co)
+fi
+
 echo -e "${CHECKMARK} Private IP: ${YELLOW}$PRIVATE_IP${NC}, Public IP: ${YELLOW}$PUBLIC_IP${NC}"
 
 # Step 4: Fetching MAC Address
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
 echo -e "${CYAN}│${NC}  Step 4: Fetching MAC Address  ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+
 ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
-if [ -n "$ACTIVE_IFACE" ]; then
-    MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
-    echo -e "${CHECKMARK} Active Interface: ${YELLOW}$ACTIVE_IFACE${NC}, MAC Address: ${YELLOW}$MAC_ADDRESS${NC}"
+if [ "$FORCE_FAIL_MAC" = true ]; then
+    log_error "Forced failure to fetch MAC Address."
+    MAC_ADDRESS="N/A"
 else
-    log_error "Could not determine active network interface."
-    exit 1
+    if [ -n "$ACTIVE_IFACE" ]; then
+        MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
+        echo -e "${CHECKMARK} Active Interface: ${YELLOW}$ACTIVE_IFACE${NC}, MAC Address: ${YELLOW}$MAC_ADDRESS${NC}"
+    else
+        log_error "Could not determine active network interface."
+    fi
 fi
 
 # Step 5: Converting Speed Results
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
 echo -e "${CYAN}│${NC}  Step 5: Converting Speed Results  ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+
 DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $7 / 1000000}')
 UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $8 / 1000000}')
 echo -e "${CHECKMARK} Download Speed: ${GREEN}$DOWNLOAD_SPEED Mbps${NC}, Upload Speed: ${GREEN}$UPLOAD_SPEED Mbps${NC}"
@@ -239,6 +233,7 @@ echo -e "${CHECKMARK} Download Speed: ${GREEN}$DOWNLOAD_SPEED Mbps${NC}, Upload 
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
 echo -e "${CYAN}│${NC}  Step 6: Extracting Shareable ID  ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+
 SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
 SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
 echo -e "${CHECKMARK} Shareable ID: ${YELLOW}$SHARE_ID${NC}"
@@ -258,6 +253,12 @@ if [ $? -eq 0 ]; then
     echo -e "${CHECKMARK} Results saved to the remote server."
 else
     log_error "Failed to save results to the remote server."
+fi
+
+# If any errors occurred, upload the error log
+if [ -n "$ERROR_LOG" ]; then
+    echo -e "$ERROR_LOG" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "cat >> $ERROR_LOG_PATH"
+    echo -e "${CHECKMARK} All errors logged and uploaded."
 fi
 
 # Footer
