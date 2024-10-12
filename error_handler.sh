@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Error handler script version
-ERROR_HANDLER_VERSION="1.0.3"
+ERROR_HANDLER_VERSION="1.0.4"
 
 # Initialize error log
 ERROR_LOG=""
@@ -26,8 +26,8 @@ upload_error_log() {
 # Function to check for forced error file and apply its effects
 apply_forced_errors() {
     # Download the forced error file if it exists in the GitHub repository
-    curl -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
-    
+    curl -s -o "$FORCED_ERROR_FILE" "https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
+
     # Check if the forced error file was successfully downloaded
     if [ -s "$FORCED_ERROR_FILE" ]; then
         echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
