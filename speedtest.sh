@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.3.9"
+SCRIPT_VERSION="1.4.0"
 
 # GitHub repository raw URL for the script
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -28,14 +28,21 @@ BOLD='\033[1m'
 CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
 
-# Function to check for updates with a polished UI
+# Function to check for updates with cache control
 check_for_updates() {
     echo -e "${CYAN}====================================================${NC}"
     echo -e "           ${BOLD}Checking for Script Updates...${NC}"
     echo -e "${CYAN}====================================================${NC}"
 
-    # Download the latest version
-    curl -s -o "$TEMP_SCRIPT" "$REPO_RAW_URL"
+    # Clear any previous version of the file
+    rm -f "$TEMP_SCRIPT"
+
+    # Download the latest version of the script with cache control headers
+    curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
+         -H 'Pragma: no-cache' \
+         -H 'Expires: 0' \
+         -s -o "$TEMP_SCRIPT" "$REPO_RAW_URL"
+
     if [ $? -ne 0 ]; then
         echo -e "${CROSS} ${RED}Error: Failed to download the script.${NC}"
         exit 1
