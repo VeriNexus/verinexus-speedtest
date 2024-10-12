@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.3.2"
+SCRIPT_VERSION="1.3.3"
 
 # GitHub repository raw URL for the script
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -169,11 +169,21 @@ echo -e "${CYAN}└────────────────────�
 
 # Save the results
 SPEEDTEST_OUTPUT=$(echo "$SPEEDTEST_OUTPUT" | awk -F, -v date="$DATE" -v time="$TIME" -v down="$DOWNLOAD_SPEED" -v up="$UPLOAD_SPEED" -v host="$HOSTNAME" -v mac="$MAC_ADDRESS" -v priv_ip="$PRIVATE_IP" -v pub_ip="$PUBLIC_IP" -v version="$SCRIPT_VERSION" -v share_id="$SHARE_ID" '{OFS=","; print $1, $2, $3, date, time, $6, down, up, share_id, priv_ip, pub_ip, host, mac, version}')
+
+# Debugging output to check SSH command before execution
+echo "Running SSH command: sshpass -p '$REMOTE_PASS' ssh -o StrictHostKeyChecking=no '$REMOTE_USER@$REMOTE_HOST' 'cat >> $REMOTE_PATH'"
+
+# Run the SSH command
 echo "$SPEEDTEST_OUTPUT" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "cat >> $REMOTE_PATH"
 
-echo -e "${CHECKMARK} ${GREEN}Results saved to the remote server.${NC}"
+# Check if the command was successful
+if [ $? -eq 0 ]; then
+    echo -e "${CHECKMARK} ${GREEN}Results saved to the remote server.${NC}"
+else
+    echo -e "${CROSS} ${RED}Error: Failed to save results to the remote server.${NC}"
+fi
 
 # Footer
 echo -e "${CYAN}====================================================${NC}"
 echo -e "${BOLD}VeriNexus Speed Test Completed Successfully!${NC}"
-echo -
+echo -e "${CYAN}====================================================${NC}"
