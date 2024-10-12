@@ -1,13 +1,15 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.5.0"
+SCRIPT_VERSION="1.6.0"
 
-# GitHub repository raw URL for the script
+# GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
+FORCED_ERROR_URL="https://raw.githubusercontent.com/Verinexus/verinexus-speedtest/main/force_error.txt"
 
-# Temporary file to store the latest version for comparison
+# Temporary files for comparison and forced error
 TEMP_SCRIPT="/tmp/latest_speedtest.sh"
+FORCED_ERROR_FILE="/tmp/force_error.txt"
 
 # SSH connection details (No password shown in the output)
 REMOTE_USER="root"                 
@@ -58,6 +60,29 @@ log_error() {
     echo -e "$ERROR_LOG" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "cat >> $ERROR_LOG_PATH"
 
     echo -e "${CROSS} ${RED}Error logged and sent to remote server.${NC}"
+}
+
+# Function to check for forced error file and execute its contents
+check_forced_error() {
+    # Download the forced error file if it exists in the GitHub repository
+    curl -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
+
+    # Check if the forced error file was successfully downloaded
+    if [ -s "$FORCED_ERROR_FILE" ]; then
+        echo -e "${RED}Forced error file found. Executing error simulation...${NC}"
+        # Execute the contents of the forced error file
+        source "$FORCED_ERROR_FILE"
+        if [ $? -ne 0 ]; then
+            log_error "Simulated error from executing force_error.txt."
+            exit 1
+        fi
+    else
+        # If the forced error file was previously downloaded but no longer exists in the repo, remove it
+        if [ -f "$FORCED_ERROR_FILE" ]; then
+            echo -e "${YELLOW}Forced error file removed from GitHub. Deleting local copy...${NC}"
+            rm -f "$FORCED_ERROR_FILE"
+        fi
+    fi
 }
 
 # Function to compare versions
@@ -134,6 +159,9 @@ run_speed_test() {
     return 1  # Fail if all attempts failed
 }
 
+# Check for forced errors before running the rest of the script
+check_forced_error
+
 # Call the update check function
 check_for_updates
 
@@ -181,6 +209,7 @@ echo -e "${CHECKMARK} Date (UK): ${YELLOW}$UK_DATE${NC}, Time (UK): ${YELLOW}$UK
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
 echo -e "${CYAN}│${NC}  Step 3: Fetching Private/Public IPs  ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+
 PRIVATE_IP=$(hostname -I | awk '{print $1}')
 PUBLIC_IP=$(curl -s ifconfig.co)
 echo -e "${CHECKMARK} Private IP: ${YELLOW}$PRIVATE_IP${NC}, Public IP: ${YELLOW}$PUBLIC_IP${NC}"
