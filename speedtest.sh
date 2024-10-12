@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.3.6"
+SCRIPT_VERSION="1.3.7"
 
 # GitHub repository raw URL for the script
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -21,53 +21,63 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[1;34m'
 CYAN='\033[1;36m'
-NC='\033[0m' 
+NC='\033[0m' # No Color
 BOLD='\033[1m'
 
 # Symbols
 CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
 
-# Function to check for updates
+# Function to check for updates with a polished UI
 check_for_updates() {
-    echo "Checking for updates..."
+    echo -e "${CYAN}====================================================${NC}"
+    echo -e "           ${BOLD}Checking for Script Updates...${NC}"
+    echo -e "${CYAN}====================================================${NC}"
+
+    # Download the latest version
     curl -s -o "$TEMP_SCRIPT" "$REPO_RAW_URL"
-
     if [ $? -ne 0 ]; then
-        echo "Error: Failed to download the script."
+        echo -e "${CROSS} ${RED}Error: Failed to download the script.${NC}"
         exit 1
     fi
 
+    # Ensure the downloaded file is valid
     if [ ! -s "$TEMP_SCRIPT" ]; then
-        echo "Error: Downloaded file is empty."
+        echo -e "${CROSS} ${RED}Error: Downloaded file is empty.${NC}"
         exit 1
     fi
 
+    # Extract version from the downloaded script
     LATEST_VERSION=$(grep -oP 'SCRIPT_VERSION="\K[0-9.]+' "$TEMP_SCRIPT")
-
     if [ -z "$LATEST_VERSION" ]; then
-        echo "Error: Failed to fetch the latest version."
+        echo -e "${CROSS} ${RED}Error: Failed to fetch the latest version.${NC}"
         exit 1
     fi
 
+    echo -e "${CHECKMARK} Current version: $SCRIPT_VERSION, Latest version: $LATEST_VERSION"
+
+    # Compare versions
     if [ "$LATEST_VERSION" != "$SCRIPT_VERSION" ]; then
+        echo -e "${YELLOW}New version available: $LATEST_VERSION${NC}"
         cp "$TEMP_SCRIPT" "$0"
         chmod +x "$0"
-        echo "Update downloaded. Please re-run the script."
+        echo -e "${CHECKMARK} Update downloaded. Please re-run the script."
         exit 0
     fi
+
+    echo -e "${CHECKMARK} You are using the latest version."
+    echo -e "${CYAN}====================================================${NC}"
 }
 
 # Call the update check function
 check_for_updates
 
 # Display Title with a Frame
-echo -e "${CYAN}================================================"
+echo -e "${CYAN}====================================================${NC}"
 echo -e "     ${BOLD}Welcome to VeriNexus Speed Test 2024${NC}"
-echo -e "================================================${NC}"
+echo -e "${CYAN}====================================================${NC}"
 echo -e "${YELLOW}(C) 2024 VeriNexus. All Rights Reserved.${NC}"
 echo -e "${YELLOW}Script Version: $SCRIPT_VERSION${NC}"
-echo
 
 # Fancy Progress Bar Function
 progress_bar() {
@@ -84,7 +94,7 @@ progress_bar
 
 # Step 1: Running Speed Test
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│  Step 1: Running Speed Test  │${NC}"
+echo -e "${CYAN}│${NC}  Step 1: Running Speed Test  ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
 if [ $? -eq 0 ]; then
@@ -107,7 +117,7 @@ echo -e "${CHECKMARK} Private IP: ${YELLOW}$PRIVATE_IP${NC}, Public IP: ${YELLOW
 
 # Step 4: Fetching MAC Address
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│  Step 4: Fetching MAC Address  │${NC}"
+echo -e "${CYAN}│${NC}  Step 4: Fetching MAC Address  ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
 if [ -n "$ACTIVE_IFACE" ]; then
@@ -128,10 +138,14 @@ SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
 echo -e "${CHECKMARK} Shareable ID: ${YELLOW}$SHARE_ID${NC}"
 
 # Step 7: Saving Results
+echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}│${NC}  Step 7: Saving Results  ${CYAN}│${NC}"
+echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+
 SPEEDTEST_OUTPUT=$(echo "$SPEEDTEST_OUTPUT" | awk -F, -v date="$DATE" -v time="$TIME" -v down="$DOWNLOAD_SPEED" -v up="$UPLOAD_SPEED" -v host="$HOSTNAME" -v mac="$MAC_ADDRESS" -v priv_ip="$PRIVATE_IP" -v pub_ip="$PUBLIC_IP" -v version="$SCRIPT_VERSION" -v share_id="$SHARE_ID" '{OFS=","; print $1, $2, $3, date, time, $6, down, up, share_id, priv_ip, pub_ip, host, mac, version}')
 
 # Run the SSH command (Password not shown in output)
-echo "Running SSH command..."
+echo -e "${BLUE}Running SSH command...${NC}"
 echo "$SPEEDTEST_OUTPUT" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "cat >> $REMOTE_PATH"
 
 if [ $? -eq 0 ]; then
