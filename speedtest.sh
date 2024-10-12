@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.3.1"
+SCRIPT_VERSION="1.3.2"
 
 # GitHub repository raw URL for the script
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -176,4 +176,4 @@ echo -e "${CHECKMARK} ${GREEN}Results saved to the remote server.${NC}"
 # Footer
 echo -e "${CYAN}====================================================${NC}"
 echo -e "${BOLD}VeriNexus Speed Test Completed Successfully!${NC}"
-echo -e "${CYAN}====================================================${NC}"
+echo -
