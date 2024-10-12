@@ -1,13 +1,13 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.2.1"
+SCRIPT_VERSION="1.3.0"
 
-# Define variables
-REMOTE_USER="root"                 # Remote server username
-REMOTE_HOST="88.208.225.250"       # Remote server address
-REMOTE_PATH="/speedtest/results/speedtest_results.csv"  # Full path to the CSV file on the remote server
-REMOTE_PASS='**@p3F_1$t'           # Remote server password (single quotes to handle special characters)
+# GitHub repository raw URL for the script
+REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
+
+# Temporary file to store the latest version for comparison
+TEMP_SCRIPT="/tmp/latest_speedtest.sh"
 
 # ANSI Color Codes
 RED='\033[0;31m'
@@ -21,6 +21,39 @@ BOLD='\033[1m'
 # Symbols
 CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
+
+# Function to check for updates
+check_for_updates() {
+    echo "Checking for updates..."
+    
+    # Download the latest version of the script from GitHub
+    curl -s -o "$TEMP_SCRIPT" "$REPO_RAW_URL"
+
+    if [ $? -eq 0 ]; then
+        # Extract the version number from the downloaded script
+        LATEST_VERSION=$(grep -oP 'SCRIPT_VERSION="\K[0-9.]+' "$TEMP_SCRIPT")
+        echo "Latest version: $LATEST_VERSION, Current version: $SCRIPT_VERSION"
+
+        # Compare versions
+        if [ "$LATEST_VERSION" != "$SCRIPT_VERSION" ]; then
+            echo "New version available: $LATEST_VERSION"
+            
+            # Overwrite the current script with the new version
+            cp "$TEMP_SCRIPT" "$0"
+            chmod +x "$0"
+            
+            echo "Update downloaded. Please re-run the script to apply changes."
+            exit 0
+        else
+            echo "You're using the latest version."
+        fi
+    else
+        echo "Error: Unable to check for updates."
+    fi
+}
+
+# Call the update check function
+check_for_updates
 
 # Display Title with a Frame
 echo -e "${CYAN}================================================"
