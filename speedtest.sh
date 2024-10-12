@@ -25,30 +25,42 @@ CROSS="${RED}✖${NC}"
 # Function to check for updates
 check_for_updates() {
     echo "Checking for updates..."
-    
-    # Download the latest version of the script from GitHub
+
+    # Step 1: Download the latest version of the script from GitHub
+    echo "Downloading the latest version of the script from: $REPO_RAW_URL"
     curl -s -o "$TEMP_SCRIPT" "$REPO_RAW_URL"
 
-    # Check if the download succeeded
-    if [ $? -ne 0 ] || [ ! -s "$TEMP_SCRIPT" ]; then
-        echo "Error: Unable to check for updates or file not found."
+    # Step 2: Check if the download was successful and file size is greater than 0
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to download the script from GitHub."
         exit 1
     fi
 
-    # Extract the version number from the downloaded script
+    if [ ! -s "$TEMP_SCRIPT" ]; then
+        echo "Error: Downloaded file is empty."
+        exit 1
+    fi
+
+    # Step 3: Debugging output to check the contents of the downloaded file
+    echo "Contents of the downloaded script:"
+    cat "$TEMP_SCRIPT" | head -n 10  # Show first 10 lines of the downloaded script
+
+    # Step 4: Extract the version number from the downloaded script
     LATEST_VERSION=$(grep -oP 'SCRIPT_VERSION="\K[0-9.]+' "$TEMP_SCRIPT")
+
+    # Step 5: Check if the version extraction was successful
     if [ -z "$LATEST_VERSION" ]; then
-        echo "Error: Failed to fetch the latest version."
+        echo "Error: Failed to fetch the latest version. Could not extract SCRIPT_VERSION."
         exit 1
     fi
 
     echo "Latest version: $LATEST_VERSION, Current version: $SCRIPT_VERSION"
 
-    # Compare versions
+    # Step 6: Compare the current version with the latest version
     if [ "$LATEST_VERSION" != "$SCRIPT_VERSION" ]; then
         echo "New version available: $LATEST_VERSION"
         
-        # Overwrite the current script with the new version
+        # Step 7: Overwrite the current script with the new version
         cp "$TEMP_SCRIPT" "$0"
         chmod +x "$0"
         
