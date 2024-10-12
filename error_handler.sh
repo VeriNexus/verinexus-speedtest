@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Error handler script version
-ERROR_HANDLER_VERSION="1.0.1"
+ERROR_HANDLER_VERSION="1.0.2"
 
 # Initialize error log
 ERROR_LOG=""
