@@ -1,13 +1,19 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.3.3"
+SCRIPT_VERSION="1.3.4"
 
 # GitHub repository raw URL for the script
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
 
 # Temporary file to store the latest version for comparison
 TEMP_SCRIPT="/tmp/latest_speedtest.sh"
+
+# SSH connection details
+REMOTE_USER="root"                 # Replace with your remote user
+REMOTE_HOST="88.208.225.250"       # Replace with your remote server address
+REMOTE_PATH="/speedtest/results/speedtest_results.csv"  # Replace with the full path to the file on the remote server
+REMOTE_PASS='**@p3F_1$t'           # Password for the remote SSH user (in single quotes for special characters)
 
 # ANSI Color Codes
 RED='\033[0;31m'
