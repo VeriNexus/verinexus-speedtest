@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Utility functions version
-UTILS_VERSION="1.0.0"
+UTILS_VERSION="1.0.3"
 
 # Function to fetch private IP
 get_private_ip() {
