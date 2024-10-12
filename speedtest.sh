@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.3.0"
+SCRIPT_VERSION="1.3.1"
 
 # GitHub repository raw URL for the script
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -29,26 +29,33 @@ check_for_updates() {
     # Download the latest version of the script from GitHub
     curl -s -o "$TEMP_SCRIPT" "$REPO_RAW_URL"
 
-    if [ $? -eq 0 ]; then
-        # Extract the version number from the downloaded script
-        LATEST_VERSION=$(grep -oP 'SCRIPT_VERSION="\K[0-9.]+' "$TEMP_SCRIPT")
-        echo "Latest version: $LATEST_VERSION, Current version: $SCRIPT_VERSION"
+    # Check if the download succeeded
+    if [ $? -ne 0 ] || [ ! -s "$TEMP_SCRIPT" ]; then
+        echo "Error: Unable to check for updates or file not found."
+        exit 1
+    fi
 
-        # Compare versions
-        if [ "$LATEST_VERSION" != "$SCRIPT_VERSION" ]; then
-            echo "New version available: $LATEST_VERSION"
-            
-            # Overwrite the current script with the new version
-            cp "$TEMP_SCRIPT" "$0"
-            chmod +x "$0"
-            
-            echo "Update downloaded. Please re-run the script to apply changes."
-            exit 0
-        else
-            echo "You're using the latest version."
-        fi
+    # Extract the version number from the downloaded script
+    LATEST_VERSION=$(grep -oP 'SCRIPT_VERSION="\K[0-9.]+' "$TEMP_SCRIPT")
+    if [ -z "$LATEST_VERSION" ]; then
+        echo "Error: Failed to fetch the latest version."
+        exit 1
+    fi
+
+    echo "Latest version: $LATEST_VERSION, Current version: $SCRIPT_VERSION"
+
+    # Compare versions
+    if [ "$LATEST_VERSION" != "$SCRIPT_VERSION" ]; then
+        echo "New version available: $LATEST_VERSION"
+        
+        # Overwrite the current script with the new version
+        cp "$TEMP_SCRIPT" "$0"
+        chmod +x "$0"
+        
+        echo "Update downloaded. Please re-run the script to apply changes."
+        exit 0
     else
-        echo "Error: Unable to check for updates."
+        echo "You're using the latest version."
     fi
 }
 
