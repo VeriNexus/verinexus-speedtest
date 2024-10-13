@@ -1,26 +1,27 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.2.1"
+SCRIPT_VERSION="2.2.2"  # Incremented version
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
-FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
-FORCE_UPDATE_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_update.txt"
+FORCED_ERROR_URL="https://raw.githubusercontent.com/VerinNexus/verinexus-speedtest/main/force_error.txt"
 
-# Temporary files for comparison, forced error, and force update
+# Paths for remote and local files
 TEMP_SCRIPT="/tmp/latest_speedtest.sh"
 FORCED_ERROR_FILE="/tmp/force_error.txt"
-FORCE_UPDATE_FILE="/tmp/force_update.txt"
-ERROR_LOG=""
-MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
+LOCAL_FORCE_UPDATE_FILE="/tmp/force_update.txt"
 
 # SSH connection details
 REMOTE_USER="root"
 REMOTE_HOST="88.208.225.250"
+REMOTE_PASS='**@p3F_1$t'  # Password for SSH access
 REMOTE_PATH="/speedtest/results/speedtest_results.csv"
 ERROR_LOG_PATH="/speedtest/results/error.txt"
-REMOTE_PASS='**@p3F_1$t'  # Password included as per your request
+FORCE_UPDATE_SSH_PATH="/speedtest/update_files/force_update.txt"
+
+ERROR_LOG=""
+MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
 
 # ANSI Color Codes
 RED='\033[0;31m'
@@ -168,19 +169,35 @@ run_speed_test() {
 
 # Force update check
 check_force_update() {
-    echo -e "${BLUE}Checking for force update...${NC}"
-    curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
-         -H 'Pragma: no-cache' \
-         -H 'Expires: 0' \
-         -s -o "$FORCE_UPDATE_FILE" "$FORCE_UPDATE_URL"
+    echo -e "${BLUE}Checking for force update via SSH...${NC}"
 
-    if [ -s "$FORCE_UPDATE_FILE" ]; then
-        echo -e "${RED}Force update file found. Forcing update to the latest version...${NC}"
-        rm -f "$FORCE_UPDATE_FILE"
-        check_for_updates
-    else
-        echo -e "${GREEN}✔ No force update file found on GitHub.${NC}"
+    # Remove any legacy local force update files
+    rm -f "$LOCAL_FORCE_UPDATE_FILE"
+
+    # Step 1: Establish SSH connection and download the force update file
+    sshpass -p "$REMOTE_PASS" scp -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST:$FORCE_UPDATE_SSH_PATH" "$LOCAL_FORCE_UPDATE_FILE"
+
+    if [ $? -ne 0 ]; then
+        echo -e "${CROSS} ${RED}Error: Failed to download force update file via SSH. Treating as no update required.${NC}"
+        return 0
     fi
+
+    # Step 2: Check the contents of the downloaded file
+    if [ -s "$LOCAL_FORCE_UPDATE_FILE" ]; then
+        CONTENT=$(cat "$LOCAL_FORCE_UPDATE_FILE")
+        echo -e "${YELLOW}Loaded force update file content: ${CONTENT}${NC}"
+        if [[ "$CONTENT" == "true" ]]; then
+            echo -e "${RED}Force update required. Proceeding with update...${NC}"
+            check_for_updates
+        else
+            echo -e "${GREEN}✔ No force update required.${NC}"
+        fi
+    else
+        echo -e "${CROSS} ${RED}Error: Force update file is empty or invalid. No update required.${NC}"
+    fi
+
+    # Clean up the local file after processing
+    rm -f "$LOCAL_FORCE_UPDATE_FILE"
 }
 
 # Apply any forced errors
