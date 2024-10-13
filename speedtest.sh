@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.0.7"
+SCRIPT_VERSION="2.0.8"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -48,13 +48,21 @@ log_error() {
 
 # Function to check for forced error file and apply its effects
 apply_forced_errors() {
-    # Download the forced error file if it exists in the GitHub repository
-    curl -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
-
+    # Download the forced error file with cache control to prevent caching
+    curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
+         -H 'Pragma: no-cache' \
+         -H 'Expires: 0' \
+         -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
+    
     # Check if the forced error file was successfully downloaded
     if [ -s "$FORCED_ERROR_FILE" ]; then
         echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
         source "$FORCED_ERROR_FILE"
+        # Debugging statements
+        echo -e "${YELLOW}Applied Forced Errors:${NC}"
+        echo "FORCE_FAIL_PRIVATE_IP=$FORCE_FAIL_PRIVATE_IP"
+        echo "FORCE_FAIL_PUBLIC_IP=$FORCE_FAIL_PUBLIC_IP"
+        echo "FORCE_FAIL_MAC=$FORCE_FAIL_MAC"
     else
         # If the forced error file was previously downloaded but no longer exists in the repo, remove it
         if [ -f "$FORCED_ERROR_FILE" ]; then
@@ -188,8 +196,19 @@ echo -e "${CYAN}┌────────────────────�
 echo -e "${CYAN}│${NC}  Step 3: ${BOLD}Fetching Private/Public IPs${NC}  ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
-PRIVATE_IP=$(hostname -I | awk '{print $1}')
-PUBLIC_IP=$(curl -s ifconfig.co)
+if [ "$FORCE_FAIL_PRIVATE_IP" = true ]; then
+    log_error "Forced failure to fetch Private IP."
+    PRIVATE_IP="N/A"
+else
+    PRIVATE_IP=$(hostname -I | awk '{print $1}')
+fi
+
+if [ "$FORCE_FAIL_PUBLIC_IP" = true ]; then
+    log_error "Forced failure to fetch Public IP."
+    PUBLIC_IP="N/A"
+else
+    PUBLIC_IP=$(curl -s ifconfig.co)
+fi
 
 echo -e "${CHECKMARK} Private IP: ${YELLOW}$PRIVATE_IP${NC}, Public IP: ${YELLOW}$PUBLIC_IP${NC}"
 
@@ -199,7 +218,10 @@ echo -e "${CYAN}│${NC}  Step 4: ${BOLD}Fetching MAC Address${NC}  ${CYAN}│${
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
 ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
-if [ -n "$ACTIVE_IFACE" ]; then
+if [ "$FORCE_FAIL_MAC" = true ]; then
+    log_error "Forced failure to fetch MAC Address."
+    MAC_ADDRESS="N/A"
+elif [ -n "$ACTIVE_IFACE" ]; then
     MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
     echo -e "${CHECKMARK} Active Interface: ${YELLOW}$ACTIVE_IFACE${NC}, MAC Address: ${YELLOW}$MAC_ADDRESS${NC}"
 else
@@ -251,6 +273,7 @@ fi
 
 # If any errors occurred, upload the error log
 if [ -n "$ERROR_LOG" ]; then
+    echo -e "${BLUE}Uploading error log...${NC}"
     echo -e "$ERROR_LOG" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "cat >> $ERROR_LOG_PATH"
     echo -e "${CHECKMARK} All errors logged and uploaded."
 fi
