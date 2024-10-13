@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.2.11"
+SCRIPT_VERSION="2.2.12"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -247,16 +247,18 @@ else
 fi
 printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 3: Fetching Private/Public IPs" "Private IP: $PRIVATE_IP, Public IP: $PUBLIC_IP"
 
-# Step 4: Fetching MAC Address
+# Step 4: Fetching MAC Address and LAN IP
 ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
 if [ "$FORCE_FAIL_MAC" = true ]; then
     log_error "Forced failure to fetch MAC Address."
     MAC_ADDRESS="N/A"
 elif [ -n "$ACTIVE_IFACE" ]; then
     MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
-    printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 4: Fetching MAC Address" "MAC Address: $MAC_ADDRESS"
+    LAN_IP=$(ip addr show $ACTIVE_IFACE | grep "inet " | awk '{print $2}' | cut -d/ -f1)
+    printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 4: Fetching LAN IP" "LAN IP: $LAN_IP"
 else
     log_error "Could not determine active network interface."
+    LAN_IP="N/A"
 fi
 
 # Step 5: Extracting the relevant fields
@@ -276,7 +278,7 @@ if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" || -z "$LATENCY" || -z "$PUBLIC
     LATENCY="0.00"
     PUBLIC_IP="N/A"
 fi
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 5: Converting Speed Results" "Download Speed: $DOWNLOAD_SPEED Mbps, Upload Speed: $UPLOAD_SPEED Mbps"
+printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 5: Converting Speed Results" "Download Speed: $DOWNLOAD_SPEED Mbps, Upload Speed: $UPLOAD_SPEED Mbps, Latency: $LATENCY ms"
 
 # Step 6: Extracting Shareable ID
 SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
@@ -290,10 +292,10 @@ SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}')
 LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}')
 LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')   # Latency is in field 6
 
-RESULT_LINE="$SERVER_ID,$SERVER_NAME,$LOCATION,$LATENCY,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$PUBLIC_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
+RESULT_LINE="$SERVER_ID,$SERVER_NAME,$LOCATION,$LATENCY,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$PUBLIC_IP,$LAN_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
 
 # Define the header for the CSV file
-HEADER_LINE="Server ID,Server Name,Location,Latency (ms),Download Speed (Mbps),Upload Speed (Mbps),Public IP,Hostname,Date (UK),Time (UK),MAC Address"
+HEADER_LINE="Server ID,Server Name,Location,Latency (ms),Download Speed (Mbps),Upload Speed (Mbps),Public IP,LAN IP,Hostname,Date (UK),Time (UK),MAC Address"
 
 # Check if the CSV file exists and is non-empty, if not, add the header
 sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
