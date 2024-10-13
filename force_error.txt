@@ -1,10 +1,10 @@
 # Uncomment the line for the failure you want to test
 
 # Simulate failure to get private IP
-# FORCE_FAIL_PRIVATE_IP=true
+FORCE_FAIL_PRIVATE_IP=true
 
 # Simulate failure to get public IP
-# FORCE_FAIL_PUBLIC_IP=true
+FORCE_FAIL_PUBLIC_IP=true
 
 # Simulate failure to fetch MAC address
-# FORCE_FAIL_MAC=true
+FORCE_FAIL_MAC=true
