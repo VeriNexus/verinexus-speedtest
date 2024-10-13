@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.2.10"
+SCRIPT_VERSION="2.2.11"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -288,7 +288,7 @@ HOSTNAME=$(hostname)
 CLIENT_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
 SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}')
 LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}')
-LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $5}')   # Latency is now the 5th field
+LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')   # Latency is in field 6
 
 RESULT_LINE="$SERVER_ID,$SERVER_NAME,$LOCATION,$LATENCY,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$PUBLIC_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
 
