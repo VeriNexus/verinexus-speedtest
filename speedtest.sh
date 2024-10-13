@@ -275,6 +275,7 @@ if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" || -z "$LATENCY" || -z "$PUBLIC
     LATENCY="0.00"
     PUBLIC_IP="N/A"
 fi
+printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 5: Converting Speed Results" "Download Speed: $DOWNLOAD_SPEED Mbps, Upload Speed: $UPLOAD_SPEED Mbps"
 
 # Step 6: Extracting Shareable ID
 SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
