@@ -1,7 +1,13 @@
 #!/bin/bash
 
 # Main script version
-SCRIPT_VERSION="1.0.8"
+SCRIPT_VERSION="1.0.10"
+
+# Define remote server credentials and file path
+REMOTE_USER='root'             # Your remote SSH username
+REMOTE_HOST='88.208.225.250'   # Your remote server IP or hostname
+REMOTE_PATH='/speedtest/results/speedtest_results.csv'  # Path to the CSV file on the remote server
+REMOTE_PASS='**@p3F_1$t'       # SSH password with single quotes
 
 # Function to download files if needed
 download_file_if_needed() {
@@ -18,7 +24,7 @@ download_file_if_needed() {
 # Define latest versions for components
 LATEST_ERROR_HANDLER_VERSION="1.0.6"
 LATEST_UPDATE_CHECK_VERSION="1.0.6"
-LATEST_RUN_SPEEDTEST_VERSION="1.0.7"
+LATEST_RUN_SPEEDTEST_VERSION="1.0.8"
 LATEST_UTILS_VERSION="1.0.6"
 
 # Download and load the latest scripts
