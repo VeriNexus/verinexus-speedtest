@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.2.2"
+SCRIPT_VERSION="2.2.3"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -43,15 +43,20 @@ log_error() {
     local public_ip="$(curl -s ifconfig.co)"
     local script_version="$SCRIPT_VERSION"
 
+    # Ensure the directory for the error log exists
+    if [ ! -d "$(dirname "$ERROR_LOG_PATH")" ]; then
+        mkdir -p "$(dirname "$ERROR_LOG_PATH")"
+    fi
+
     # Format the error log entry as a single line in CSV format
     local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,\"$error_message\""
+
+    # Write the error entry to the log file
     echo -e "$error_entry" >> "$ERROR_LOG_PATH"
 
     echo -e "${CROSS} ${RED}Error: $error_message${NC}"
 }
 
-# Function to check for forced error file and apply its effects
-# Function to check for forced error file and apply its effects
 # Function to check for forced error file and apply its effects
 apply_forced_errors() {
     # Download the forced error file with cache control to prevent caching
@@ -70,12 +75,13 @@ apply_forced_errors() {
 
         # Validate the file before sourcing it
         if bash -n "$FORCED_ERROR_FILE"; then
-            source "$FORCED_ERROR_FILE"
+            # Force sourcing to ensure proper application
+            . "$FORCED_ERROR_FILE"
             # Debugging statements
             echo -e "${YELLOW}Applied Forced Errors:${NC}"
-            echo "FORCE_FAIL_PRIVATE_IP=$FORCE_FAIL_PRIVATE_IP"
-            echo "FORCE_FAIL_PUBLIC_IP=$FORCE_FAIL_PUBLIC_IP"
-            echo "FORCE_FAIL_MAC=$FORCE_FAIL_MAC"
+            echo "FORCE_FAIL_PRIVATE_IP=${FORCE_FAIL_PRIVATE_IP:-false}"
+            echo "FORCE_FAIL_PUBLIC_IP=${FORCE_FAIL_PUBLIC_IP:-false}"
+            echo "FORCE_FAIL_MAC=${FORCE_FAIL_MAC:-false}"
         else
             log_error "Forced error file contains invalid syntax. Deleting local copy."
             rm -f "$FORCED_ERROR_FILE"
@@ -88,8 +94,6 @@ apply_forced_errors() {
         fi
     fi
 }
-
-
 
 # Function to compare versions using awk
 version_gt() {
