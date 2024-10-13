@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.0.4"
+SCRIPT_VERSION="2.0.5"
 
 # Define variables
 REMOTE_USER="root"                  # Remote server username
@@ -61,12 +61,12 @@ echo -e "${CYAN}│${NC}  Step 2: ${BOLD}Fetching Date and Time${NC}  ${CYAN}│
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 echo -e "${BLUE}Fetching Date and Time...${NC}"
 
-# Extract timestamp
+# Extract timestamp and convert to UK time
 TIMESTAMP=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $4}')
-DATE=$(echo "$TIMESTAMP" | cut -d'T' -f1)
-TIME=$(echo "$TIMESTAMP" | cut -d'T' -f2 | cut -d'.' -f1)
+DATE=$(date -d "$TIMESTAMP" +"%Y-%m-%d")
+TIME=$(date -d "$TIMESTAMP" +"%H:%M:%S")
 
-echo -e "${CHECKMARK} Date: ${YELLOW}$DATE${NC}, Time: ${YELLOW}$TIME${NC}"
+echo -e "${CHECKMARK} Date: ${YELLOW}$DATE${NC}, Time (UK): ${YELLOW}$TIME${NC}"
 
 # Fetch Private/Public IPs
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
@@ -120,7 +120,7 @@ LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}')
 LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $5}')
 JITTER=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')
 
-RESULT="$CLIENT_ID,$SERVER_NAME,$LOCATION,$TIMESTAMP,$LATENCY,$JITTER,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$SHARE_ID,$PRIVATE_IP,$PUBLIC_IP,$HOSTNAME,$DATE,$TIME,$MAC_ADDRESS"
+RESULT="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$JITTER,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$SHARE_ID,$PRIVATE_IP,$PUBLIC_IP,$HOSTNAME,$DATE,$TIME,$MAC_ADDRESS"
 
 # Save the results to the remote server
 sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "echo '$RESULT' >> $REMOTE_PATH"
