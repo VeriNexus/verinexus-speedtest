@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.2.7"
+SCRIPT_VERSION="2.2.8"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -259,16 +259,22 @@ else
     log_error "Could not determine active network interface."
 fi
 
-# Step 5: Converting Speed Results
-DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $7 / 1000000}')  # Converting download speed from bps to Mbps
-UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $8 / 1000000}')    # Converting upload speed from bps to Mbps
+# Step 5: Extracting the relevant fields
+SERVER_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
+SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}')
+LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}')
+LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')   # Latency
+DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $7 / 1000000}')  # Convert download speed from bps to Mbps
+UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $8 / 1000000}')    # Convert upload speed from bps to Mbps
+PUBLIC_IP=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $10}')  # Public IP
 
-if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" ]]; then
-    log_error "Speed Test did not return valid download/upload speeds."
+if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" || -z "$LATENCY" || -z "$PUBLIC_IP" ]]; then
+    log_error "Speed Test did not return valid data."
     DOWNLOAD_SPEED="0.00"
     UPLOAD_SPEED="0.00"
+    LATENCY="0.00"
+    PUBLIC_IP="N/A"
 fi
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 5: Converting Speed Results" "Download Speed: $DOWNLOAD_SPEED Mbps, Upload Speed: $UPLOAD_SPEED Mbps"
 
 # Step 6: Extracting Shareable ID
 SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
@@ -282,10 +288,10 @@ SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}')
 LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}')
 LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $5}')   # Latency is now the 5th field
 
-RESULT_LINE="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$SHARE_ID,$PRIVATE_IP,$PUBLIC_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
+RESULT_LINE="$SERVER_ID,$SERVER_NAME,$LOCATION,$LATENCY,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$PUBLIC_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
 
 # Define the header for the CSV file
-HEADER_LINE="Client ID,Server Name,Location,Latency (ms),Jitter (ms),Download Speed (Mbps),Upload Speed (Mbps),Shareable ID,Private IP,Public IP,Hostname,Date (UK),Time (UK),MAC Address"
+HEADER_LINE="Server ID,Server Name,Location,Latency (ms),Download Speed (Mbps),Upload Speed (Mbps),Public IP,Hostname,Date (UK),Time (UK),MAC Address"
 
 # Check if the CSV file exists and is non-empty, if not, add the header
 sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
