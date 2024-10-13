@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.0.10"
+SCRIPT_VERSION="2.0.11"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -53,7 +53,7 @@ apply_forced_errors() {
          -H 'Pragma: no-cache' \
          -H 'Expires: 0' \
          -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
-    
+
     # Check if the forced error file was successfully downloaded
     if [ -s "$FORCED_ERROR_FILE" ]; then
         echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
@@ -72,10 +72,23 @@ apply_forced_errors() {
     fi
 }
 
-# Function to compare versions
+# Function to compare versions using awk
 version_gt() {
-    # Returns 0 if $1 > $2
-    test "$(printf '%s\n' "$2" "$1" | sort -V | head -n1)" != "$2"
+    awk -v v1="$1" -v v2="$2" '
+    BEGIN {
+        split(v1, a, ".")
+        split(v2, b, ".")
+        for (i = 1; i <= length(a) || i <= length(b); i++) {
+            a_i = (i in a) ? a[i] : 0
+            b_i = (i in b) ? b[i] : 0
+            if (a_i > b_i) {
+                exit 0  # v1 > v2
+            } else if (a_i < b_i) {
+                exit 1  # v1 < v2
+            }
+        }
+        exit 1  # v1 == v2
+    }'
 }
 
 # Function to check for updates with cache control and version check
@@ -275,7 +288,11 @@ fi
 if [ -n "$ERROR_LOG" ]; then
     echo -e "${BLUE}Uploading error log...${NC}"
     echo -e "$ERROR_LOG" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "cat >> $ERROR_LOG_PATH"
-    echo -e "${CHECKMARK} All errors logged and uploaded."
+    if [ $? -eq 0 ]; then
+        echo -e "${CHECKMARK} All errors logged and uploaded."
+    else
+        echo -e "${CROSS} ${RED}Failed to upload error log to the remote server.${NC}"
+    fi
 fi
 
 # Footer
