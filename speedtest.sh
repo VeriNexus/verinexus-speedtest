@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Main script version
-SCRIPT_VERSION="1.0.7"
+SCRIPT_VERSION="1.0.8"
 
 # Function to download files if needed
 download_file_if_needed() {
@@ -10,7 +10,7 @@ download_file_if_needed() {
 
     if [[ ! -f "./$file_name" ]] || [[ $(grep "$latest_version_var" "./$file_name" | cut -d'=' -f2 | tr -d '"') != "${!latest_version_var}" ]]; then
         echo "Updating $file_name to the latest version..."
-        curl -s "https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/$file_name" -o "./$file_name"
+        curl -s -o "./$file_name" "https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/$file_name"
         chmod +x "./$file_name"
     fi
 }
