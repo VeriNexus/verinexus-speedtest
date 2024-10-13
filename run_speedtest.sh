@@ -1,14 +1,14 @@
 #!/bin/bash
 
 # Speedtest script version
-RUN_SPEEDTEST_VERSION="1.0.6"
+RUN_SPEEDTEST_VERSION="1.0.7"
 
 run_speed_test() {
     echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
     echo -e "${CYAN}│${NC}  Step 1: Running Speed Test  ${CYAN}│${NC}"
     echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
-    # Run the speed test with retry logic
+    # Run the speed test
     SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
     if [ $? -eq 0 ]; then
         echo -e "${CHECKMARK} Speed Test completed successfully."
@@ -31,10 +31,10 @@ run_speed_test() {
     echo -e "${CYAN}│${NC}  Step 3: Saving Results  ${CYAN}│${NC}"
     echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
-    # Process the result for storage
-    SPEEDTEST_OUTPUT=$(echo "$SPEEDTEST_OUTPUT" | awk -F, -v date="$UK_DATE" -v time="$UK_TIME" '{OFS=","; print $1, $2, $3, date, time, $6, $7, $8, $9}')
+    # Debug the SSH command
+    echo "Running SSH command: sshpass -p '$REMOTE_PASS' ssh -o StrictHostKeyChecking=no '$REMOTE_USER@$REMOTE_HOST' 'echo \"$SPEEDTEST_OUTPUT\" >> $REMOTE_PATH'"
 
-    # Upload the result to the remote server using sshpass
+    # Upload the result to the remote server
     sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "echo '$SPEEDTEST_OUTPUT' >> $REMOTE_PATH"
     
     if [ $? -eq 0 ]; then
