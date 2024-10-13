@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Speedtest script version
-RUN_SPEEDTEST_VERSION="1.0.7"
+RUN_SPEEDTEST_VERSION="1.0.9"
 
 run_speed_test() {
     echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
@@ -35,7 +35,7 @@ run_speed_test() {
     echo "Running SSH command: sshpass -p '$REMOTE_PASS' ssh -o StrictHostKeyChecking=no '$REMOTE_USER@$REMOTE_HOST' 'echo \"$SPEEDTEST_OUTPUT\" >> $REMOTE_PATH'"
 
     # Upload the result to the remote server
-    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "echo '$SPEEDTEST_OUTPUT' >> $REMOTE_PATH"
+    sshpass -p '$REMOTE_PASS' ssh -o StrictHostKeyChecking=no '$REMOTE_USER@$REMOTE_HOST' "echo '$SPEEDTEST_OUTPUT' >> $REMOTE_PATH"
     
     if [ $? -eq 0 ]; then
         echo -e "${CHECKMARK} Results saved to the remote server."
