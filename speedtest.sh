@@ -18,7 +18,7 @@ download_file_if_needed() {
 # Define latest versions for components
 LATEST_ERROR_HANDLER_VERSION="1.0.6"
 LATEST_UPDATE_CHECK_VERSION="1.0.6"
-LATEST_RUN_SPEEDTEST_VERSION="1.0.6"
+LATEST_RUN_SPEEDTEST_VERSION="1.0.7"
 LATEST_UTILS_VERSION="1.0.6"
 
 # Download and load the latest scripts
