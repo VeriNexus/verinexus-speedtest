@@ -1,15 +1,17 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.1.4"
+SCRIPT_VERSION="2.1.5"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
 FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
+FORCE_UPDATE_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_update.txt"
 
 # Temporary files for comparison and forced error
 TEMP_SCRIPT="/tmp/latest_speedtest.sh"
 FORCED_ERROR_FILE="/tmp/force_error.txt"
+FORCE_UPDATE_FILE="/tmp/force_update.txt"
 ERROR_LOG=""
 MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
 
@@ -43,47 +45,12 @@ log_error() {
     local private_ip="$(hostname -I | awk '{print $1}')"
     local public_ip="$(curl -s ifconfig.co)"
     local script_version="$SCRIPT_VERSION"
-    local mac_address="$MAC_ADDRESS"
 
     # Format the error log entry as a single line in CSV format
-    local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,$mac_address,\"$error_message\""
+    local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,\"$error_message\""
     ERROR_LOG+="$error_entry\n"
 
     echo -e "${CROSS} ${RED}Error: $error_message${NC}"
-}
-
-# Function to apply forced errors
-apply_forced_errors() {
-    # Download the forced error file with cache control to prevent caching
-    curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
-         -H 'Pragma: no-cache' \
-         -H 'Expires: 0' \
-         -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
-
-    # Check if the forced error file was successfully downloaded
-    if [ -s "$FORCED_ERROR_FILE" ]; then
-        echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
-
-        # Parse the forced error file and ensure only uncommented lines are executed
-        while IFS= read -r line || [ -n "$line" ]; do
-            # Ignore commented lines (lines starting with #) or blank lines
-            if [[ ! "$line" =~ ^# ]] && [[ -n "$line" ]]; then
-                eval "$line"
-            fi
-        done < "$FORCED_ERROR_FILE"
-
-        # Debugging statements
-        echo -e "${YELLOW}Applied Forced Errors:${NC}"
-        echo "FORCE_FAIL_PRIVATE_IP=${FORCE_FAIL_PRIVATE_IP:-false}"
-        echo "FORCE_FAIL_PUBLIC_IP=${FORCE_FAIL_PUBLIC_IP:-false}"
-        echo "FORCE_FAIL_MAC=${FORCE_FAIL_MAC:-false}"
-    else
-        # If the forced error file was previously downloaded but no longer exists in the repo, remove it
-        if [ -f "$FORCED_ERROR_FILE" ]; then
-            echo -e "${YELLOW}Forced error file removed from GitHub. Deleting local copy...${NC}"
-            rm -f "$FORCED_ERROR_FILE"
-        fi
-    fi
 }
 
 # Function to compare versions using awk
@@ -155,44 +122,37 @@ check_for_updates() {
     echo -e "${CYAN}====================================================${NC}"
 }
 
-# Function to run the speed test with retries
-run_speed_test() {
-    local attempts=0
-    local max_attempts=3
-    while [ $attempts -lt $max_attempts ]; do
-        echo -e "${BLUE}Attempting speed test (Attempt $((attempts+1)) of $max_attempts)...${NC}"
-        SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
-        if [ $? -eq 0 ]; then
-            echo -e "${CHECKMARK} Speed Test completed successfully."
-            return 0
-        else
-            log_error "Speed Test failed on attempt $((attempts+1))."
-            attempts=$((attempts+1))
-            sleep 5  # Wait before retrying
-        fi
-    done
-    return 1  # Fail if all attempts failed
+# Function to remove legacy force update file
+cleanup_force_update() {
+    if [ -f "$FORCE_UPDATE_FILE" ]; then
+        echo -e "${BLUE}Removing legacy force update file.${NC}"
+        rm -f "$FORCE_UPDATE_FILE"
+    fi
 }
 
-# Remove any legacy force update file
-if [ -f "/tmp/force_update.txt" ]; then
-    rm /tmp/force_update.txt
-    echo "Removed legacy force update file."
-fi
+# Function to check and apply forced updates
+check_forced_update() {
+    # Download the forced update file with cache control
+    curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
+         -H 'Pragma: no-cache' \
+         -H 'Expires: 0' \
+         -s -o "$FORCE_UPDATE_FILE" "$FORCE_UPDATE_URL"
 
-# Download force update file if available
-curl -s "$REPO_RAW_URL/force_update.txt" -o /tmp/force_update.txt
+    # If the forced update file exists, force an update
+    if [ -s "$FORCE_UPDATE_FILE" ]; then
+        echo -e "${YELLOW}Force update file found. Forcing update to the latest version...${NC}"
+        check_for_updates
+        # After the update, remove the force update file
+        cleanup_force_update
+        exit 0
+    else
+        echo -e "${GREEN}✔ No force update file found on GitHub.${NC}"
+        cleanup_force_update
+    fi
+}
 
-if [ -s "/tmp/force_update.txt" ]; then
-    echo "Force update file found. Forcing update to the latest version..."
-    check_for_updates
-    exit 0
-else
-    echo "No force update file found on GitHub."
-fi
-
-# Apply any forced errors
-apply_forced_errors
+# Run forced update check before the script starts
+check_forced_update
 
 # Call the update check function
 check_for_updates
@@ -222,6 +182,24 @@ echo -e "${CYAN}┌────────────────────�
 echo -e "${CYAN}│${NC}  Step 1: ${BOLD}Running Speed Test${NC}           ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
+run_speed_test() {
+    local attempts=0
+    local max_attempts=3
+    while [ $attempts -lt $max_attempts ]; do
+        echo -e "${BLUE}Attempting speed test (Attempt $((attempts+1)) of $max_attempts)...${NC}"
+        SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
+        if [ $? -eq 0 ]; then
+            echo -e "${CHECKMARK} Speed Test completed successfully."
+            return 0
+        else
+            log_error "Speed Test failed on attempt $((attempts+1))."
+            attempts=$((attempts+1))
+            sleep 5  # Wait before retrying
+        fi
+    done
+    return 1  # Fail if all attempts failed
+}
+
 if ! run_speed_test; then
     log_error "Speed Test failed after multiple attempts."
 fi
@@ -240,20 +218,8 @@ echo -e "${CYAN}┌────────────────────�
 echo -e "${CYAN}│${NC}  Step 3: ${BOLD}Fetching Private/Public IPs${NC}    ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
-if [ "$FORCE_FAIL_PRIVATE_IP" = true ]; then
-    log_error "Forced failure to fetch Private IP."
-    PRIVATE_IP="N/A"
-else
-    PRIVATE_IP=$(hostname -I | awk '{print $1}')
-fi
-
-if [ "$FORCE_FAIL_PUBLIC_IP" = true ]; then
-    log_error "Forced failure to fetch Public IP."
-    PUBLIC_IP="N/A"
-else
-    PUBLIC_IP=$(curl -s ifconfig.co)
-fi
-
+PRIVATE_IP=$(hostname -I | awk '{print $1}')
+PUBLIC_IP=$(curl -s ifconfig.co)
 echo -e "${CHECKMARK} Private IP: ${YELLOW}$PRIVATE_IP${NC}, Public IP: ${YELLOW}$PUBLIC_IP${NC}"
 
 # Step 4: Fetching MAC Address
@@ -262,16 +228,8 @@ echo -e "${CYAN}│${NC}  Step 4: ${BOLD}Fetching MAC Address${NC}          ${CY
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
 ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
-if [ "$FORCE_FAIL_MAC" = true ]; then
-    log_error "Forced failure to fetch MAC Address."
-    MAC_ADDRESS="N/A"
-elif [ -n "$ACTIVE_IFACE" ]; then
-    MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
-    echo -e "${CHECKMARK} Active Interface: ${YELLOW}$ACTIVE_IFACE${NC}, MAC Address: ${YELLOW}$MAC_ADDRESS${NC}"
-else
-    log_error "Could not determine active network interface."
-    MAC_ADDRESS="N/A"
-fi
+MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
+echo -e "${CHECKMARK} Active Interface: ${YELLOW}$ACTIVE_IFACE${NC}, MAC Address: ${YELLOW}$MAC_ADDRESS${NC}"
 
 # Step 5: Converting Speed Results
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
