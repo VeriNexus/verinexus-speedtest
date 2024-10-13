@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.1.10"
+SCRIPT_VERSION="2.1.11"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -53,7 +53,7 @@ log_error() {
 
 # Function to check for forced error file and apply its effects
 apply_forced_errors() {
-    # Download the forced error file with cache control to prevent caching
+    echo -e "${YELLOW}Downloading forced error file with no-cache headers...${NC}"
     curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
          -H 'Pragma: no-cache' \
          -H 'Expires: 0' \
@@ -63,22 +63,27 @@ apply_forced_errors() {
     echo -e "${CYAN}Contents of Forced Error File:${NC}"
     cat "$FORCED_ERROR_FILE"
 
+    # Reset values before applying forced errors
+    unset FORCE_FAIL_PRIVATE_IP
+    unset FORCE_FAIL_PUBLIC_IP
+    unset FORCE_FAIL_MAC
+
     # Check if the forced error file was successfully downloaded and its content
     if [ -s "$FORCED_ERROR_FILE" ]; then
         echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
         source "$FORCED_ERROR_FILE"
-        # Debugging statements
+
+        # Debugging statements after sourcing the file
         echo -e "${YELLOW}Applied Forced Errors:${NC}"
-        echo "FORCE_FAIL_PRIVATE_IP=${FORCE_FAIL_PRIVATE_IP:-false}"
-        echo "FORCE_FAIL_PUBLIC_IP=${FORCE_FAIL_PUBLIC_IP:-false}"
-        echo "FORCE_FAIL_MAC=${FORCE_FAIL_MAC:-false}"
+        echo "FORCE_FAIL_PRIVATE_IP=${FORCE_FAIL_PRIVATE_IP}"
+        echo "FORCE_FAIL_PUBLIC_IP=${FORCE_FAIL_PUBLIC_IP}"
+        echo "FORCE_FAIL_MAC=${FORCE_FAIL_MAC}"
     else
-        # If the forced error file was previously downloaded but no longer exists in the repo, remove it
         if [ -f "$FORCED_ERROR_FILE" ]; then
             echo -e "${YELLOW}Forced error file removed from GitHub. Deleting local copy...${NC}"
             rm -f "$FORCED_ERROR_FILE"
         fi
-    fi  # Corrected 'fi' statement
+    fi
 }
 
 # Function to compare versions using awk
@@ -150,18 +155,14 @@ check_for_updates() {
     echo -e "${CYAN}====================================================${NC}"
 }
 
-# Retry function to retry the speed test in case of failure
+# Function to run the speed test with retries
 run_speed_test() {
     local attempts=0
     local max_attempts=3
     while [ $attempts -lt $max_attempts ]; do
         echo -e "${BLUE}Attempting speed test (Attempt $((attempts+1)) of $max_attempts)...${NC}"
         SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
-        
-        # Debug: print the full SPEEDTEST_OUTPUT to see if it's captured correctly
-        echo "Speed Test Output: $SPEEDTEST_OUTPUT"
-        
-        if [ $? -eq 0 ] && [ -n "$SPEEDTEST_OUTPUT" ]; then
+        if [ $? -eq 0 ]; then
             echo -e "${CHECKMARK} Speed Test completed successfully."
             return 0
         else
@@ -173,19 +174,6 @@ run_speed_test() {
     return 1  # Fail if all attempts failed
 }
 
-# Apply any forced errors
-apply_forced_errors
-
-# Call the update check function
-check_for_updates
-
-# Display Title with a Frame
-echo -e "${CYAN}====================================================${NC}"
-echo -e "     ${BOLD}Welcome to VeriNexus Speed Test 2024${NC}"
-echo -e "${CYAN}====================================================${NC}"
-echo -e "${YELLOW}(C) 2024 VeriNexus. All Rights Reserved.${NC}"
-echo -e "${YELLOW}Script Version: $SCRIPT_VERSION${NC}"
-
 # Fancy Progress Bar Function
 progress_bar() {
     echo -n -e "["
@@ -196,7 +184,13 @@ progress_bar() {
     echo -e "]"
 }
 
-echo -e "${BLUE}${BOLD}Starting VeriNexus Speed Test...${NC}"
+# Main process to execute the VeriNexus Speed Test
+echo -e "${CYAN}====================================================${NC}"
+echo -e "     ${BOLD}Welcome to VeriNexus Speed Test 2024${NC}"
+echo -e "${CYAN}====================================================${NC}"
+echo -e "${YELLOW}(C) 2024 VeriNexus. All Rights Reserved.${NC}"
+echo -e "${YELLOW}Script Version: $SCRIPT_VERSION${NC}"
+
 progress_bar
 
 # Step 1: Running Speed Test with retry logic
@@ -301,14 +295,11 @@ fi
 # If any errors occurred, upload the error log
 if [ -n "$ERROR_LOG" ]; then
     echo -e "${BLUE}Uploading error log...${NC}"
-    # Create a temporary file for the error log
     TEMP_ERROR_LOG=$(mktemp)
     echo -e "$ERROR_LOG" > "$TEMP_ERROR_LOG"
 
-    # Upload the error log and implement size limitation on the remote server
     sshpass -p "$REMOTE_PASS" scp -o StrictHostKeyChecking=no "$TEMP_ERROR_LOG" "$REMOTE_USER@$REMOTE_HOST:/tmp/error_temp.txt"
     sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
-        # Prepend the new error log entry to the existing error log
         if [ -f '$ERROR_LOG_PATH' ]; then
             mv '$ERROR_LOG_PATH' '/tmp/old_error_log.txt'
             cat /tmp/error_temp.txt /tmp/old_error_log.txt > '$ERROR_LOG_PATH'
@@ -316,15 +307,11 @@ if [ -n "$ERROR_LOG" ]; then
         else
             mv /tmp/error_temp.txt '$ERROR_LOG_PATH'
         fi
-        # Remove the temporary error log file
         rm /tmp/error_temp.txt
-        # Check the size of the error log file
         FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
         MAX_SIZE=$MAX_ERROR_LOG_SIZE
         if [ \$FILE_SIZE -gt \$MAX_SIZE ]; then
-            # Truncate the oldest entries from the end to reduce the file size
             while [ \$FILE_SIZE -gt \$MAX_SIZE ]; do
-                # Remove the last line (oldest entry)
                 sed -i '\$d' '$ERROR_LOG_PATH'
                 FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
             done
@@ -337,11 +324,9 @@ if [ -n "$ERROR_LOG" ]; then
         echo -e "${CROSS} ${RED}Failed to upload error log to the remote server.${NC}"
     fi
 
-    # Remove the temporary error log file
     rm -f "$TEMP_ERROR_LOG"
 fi
 
-# Footer
 echo -e "${CYAN}====================================================${NC}"
 echo -e "${BOLD}VeriNexus Speed Test Completed Successfully!${NC}"
 echo -e "${CYAN}====================================================${NC}"
