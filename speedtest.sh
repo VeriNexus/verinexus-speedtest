@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.0.11"
+SCRIPT_VERSION="2.0.12"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -11,6 +11,7 @@ FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtes
 TEMP_SCRIPT="/tmp/latest_speedtest.sh"
 FORCED_ERROR_FILE="/tmp/force_error.txt"
 ERROR_LOG=""
+MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
 
 # SSH connection details (Password included as per your request)
 REMOTE_USER="root"
@@ -247,8 +248,8 @@ echo -e "${CYAN}┌────────────────────�
 echo -e "${CYAN}│${NC}  Step 5: ${BOLD}Converting Speed Results${NC}      ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
-DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $7 / 1000000}')
-UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $8 / 1000000}')
+DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $7 / 1000000}')
+UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $8 / 1000000}')
 echo -e "${CHECKMARK} Download Speed: ${GREEN}$DOWNLOAD_SPEED Mbps${NC}, Upload Speed: ${GREEN}$UPLOAD_SPEED Mbps${NC}"
 
 # Step 6: Extracting Shareable ID
@@ -275,8 +276,9 @@ JITTER=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')
 RESULT_LINE="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$JITTER,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$SHARE_ID,$PRIVATE_IP,$PUBLIC_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
 
 # Run the SSH command with password authentication
-echo -e "${BLUE}Running SSH command...${NC}"
-echo "$RESULT_LINE" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "cat >> $REMOTE_PATH"
+echo -e "${BLUE}Running SSH command to save results...${NC}"
+echo "$RESULT_LINE" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" \
+"echo '$RESULT_LINE' >> '$REMOTE_PATH'"
 
 if [ $? -eq 0 ]; then
     echo -e "${CHECKMARK} Results saved to the remote server."
@@ -287,12 +289,35 @@ fi
 # If any errors occurred, upload the error log
 if [ -n "$ERROR_LOG" ]; then
     echo -e "${BLUE}Uploading error log...${NC}"
-    echo -e "$ERROR_LOG" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "cat >> $ERROR_LOG_PATH"
+    # Create a temporary file for the error log
+    TEMP_ERROR_LOG=$(mktemp)
+    echo -e "$ERROR_LOG" > "$TEMP_ERROR_LOG"
+
+    # Upload the error log and implement size limitation on the remote server
+    sshpass -p "$REMOTE_PASS" scp -o StrictHostKeyChecking=no "$TEMP_ERROR_LOG" "$REMOTE_USER@$REMOTE_HOST:/tmp/error_temp.txt"
+    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
+        # Append the new error log to the existing error log
+        cat /tmp/error_temp.txt >> '$ERROR_LOG_PATH'
+        rm /tmp/error_temp.txt
+        # Check the size of the error log file
+        FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
+        MAX_SIZE=$MAX_ERROR_LOG_SIZE
+        if [ \$FILE_SIZE -gt \$MAX_SIZE ]; then
+            # Truncate the oldest entries to reduce the file size below the limit
+            TEMP_FILE='/tmp/error_log_temp.txt'
+            tail -c \$MAX_SIZE '$ERROR_LOG_PATH' > \$TEMP_FILE
+            mv \$TEMP_FILE '$ERROR_LOG_PATH'
+        fi
+    "
+
     if [ $? -eq 0 ]; then
         echo -e "${CHECKMARK} All errors logged and uploaded."
     else
         echo -e "${CROSS} ${RED}Failed to upload error log to the remote server.${NC}"
     fi
+
+    # Remove the temporary error log file
+    rm -f "$TEMP_ERROR_LOG"
 fi
 
 # Footer
