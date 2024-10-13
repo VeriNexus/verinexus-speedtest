@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Main script version
-SCRIPT_VERSION="2.0.2"
+SCRIPT_VERSION="2.0.3"
 
 # Define remote server credentials and file path
 REMOTE_USER='root'
@@ -48,10 +48,10 @@ download_file_if_needed() {
     fi
 }
 
-# Fetch the latest version from GitHub and debug
+# Fetch the latest version by reading the version from the script itself
 fetch_latest_version() {
     echo "Fetching the latest script version from GitHub..."
-    LATEST_MAIN_VERSION=$(curl -s https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/version.txt)
+    LATEST_MAIN_VERSION=$(curl -s https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh | grep "SCRIPT_VERSION=" | head -1 | cut -d'"' -f2)
     if [[ -z "$LATEST_MAIN_VERSION" ]]; then
         echo "Error: Failed to retrieve the latest version."
         exit 1
