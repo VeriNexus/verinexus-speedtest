@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Main script version
-SCRIPT_VERSION="1.1.5"
+SCRIPT_VERSION="1.1.6"
 
 # Define remote server credentials and file path
 REMOTE_USER='root'
@@ -42,6 +42,30 @@ download_file_if_needed() {
     fi
 }
 
+# Ensure version comparison doesn't keep looping
+check_and_update_script() {
+    if [[ "$LATEST_MAIN_VERSION" != "$SCRIPT_VERSION" ]]; then
+        echo "Update available for main script: $LATEST_MAIN_VERSION"
+        echo "Downloading the latest version..."
+        
+        curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
+             -H 'Pragma: no-cache' \
+             -H 'Expires: 0' \
+             -o "./speedtest.sh" \
+             "https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh?t=$(date +%s)"
+        
+        if [[ $? -eq 0 ]]; then
+            echo "Update downloaded to version $LATEST_MAIN_VERSION. Please re-run the script."
+            chmod +x "./speedtest.sh"
+            exit 0
+        else
+            echo "Failed to download the main script update. Continuing with the current version."
+        fi
+    else
+        echo "You are using the latest version: $SCRIPT_VERSION"
+    fi
+}
+
 # Define the latest versions for each component
 LATEST_ERROR_HANDLER_VERSION="1.0.6"
 LATEST_UPDATE_CHECK_VERSION="1.1.3"
@@ -54,6 +78,9 @@ echo "DEBUG: LATEST_ERROR_HANDLER_VERSION: $LATEST_ERROR_HANDLER_VERSION"
 echo "DEBUG: LATEST_UPDATE_CHECK_VERSION: $LATEST_UPDATE_CHECK_VERSION"
 echo "DEBUG: LATEST_RUN_SPEEDTEST_VERSION: $LATEST_RUN_SPEEDTEST_VERSION"
 echo "DEBUG: LATEST_UTILS_VERSION: $LATEST_UTILS_VERSION"
+
+# Check for updates and only download if there is a new version
+check_and_update_script
 
 # Download and load the latest scripts
 download_file_if_needed "error_handler.sh" LATEST_ERROR_HANDLER_VERSION
@@ -87,9 +114,6 @@ progress_bar() {
     done
     echo -e "]"
 }
-
-# Check for script updates
-check_for_updates
 
 # Display versions for all components
 echo -e "${CYAN}====================================================${NC}"
