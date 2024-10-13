@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.2.1"
+SCRIPT_VERSION="2.2.2"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -52,6 +52,7 @@ log_error() {
 
 # Function to check for forced error file and apply its effects
 # Function to check for forced error file and apply its effects
+# Function to check for forced error file and apply its effects
 apply_forced_errors() {
     # Download the forced error file with cache control to prevent caching
     curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
@@ -63,22 +64,22 @@ apply_forced_errors() {
     if [ -s "$FORCED_ERROR_FILE" ]; then
         echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
 
-        # Parse the forced error file and apply only uncommented lines
-        while IFS= read -r line; do
-            # Skip commented or empty lines
-            if [[ "$line" =~ ^#.*$ ]] || [[ -z "$line" ]]; then
-                continue
-            fi
+        # Display the contents of the downloaded force_error.txt file for debugging
+        echo -e "Contents of force_error.txt file being applied:"
+        cat "$FORCED_ERROR_FILE"
 
-            # Evaluate the line (this sets the FORCE_FAIL_* variables)
-            eval "$line"
-        done < "$FORCED_ERROR_FILE"
-
-        # Debugging statements
-        echo -e "${YELLOW}Applied Forced Errors:${NC}"
-        echo "FORCE_FAIL_PRIVATE_IP=${FORCE_FAIL_PRIVATE_IP:-false}"
-        echo "FORCE_FAIL_PUBLIC_IP=${FORCE_FAIL_PUBLIC_IP:-false}"
-        echo "FORCE_FAIL_MAC=${FORCE_FAIL_MAC:-false}"
+        # Validate the file before sourcing it
+        if bash -n "$FORCED_ERROR_FILE"; then
+            source "$FORCED_ERROR_FILE"
+            # Debugging statements
+            echo -e "${YELLOW}Applied Forced Errors:${NC}"
+            echo "FORCE_FAIL_PRIVATE_IP=$FORCE_FAIL_PRIVATE_IP"
+            echo "FORCE_FAIL_PUBLIC_IP=$FORCE_FAIL_PUBLIC_IP"
+            echo "FORCE_FAIL_MAC=$FORCE_FAIL_MAC"
+        else
+            log_error "Forced error file contains invalid syntax. Deleting local copy."
+            rm -f "$FORCED_ERROR_FILE"
+        fi
     else
         # If the forced error file was previously downloaded but no longer exists in the repo, remove it
         if [ -f "$FORCED_ERROR_FILE" ]; then
@@ -87,6 +88,7 @@ apply_forced_errors() {
         fi
     fi
 }
+
 
 
 # Function to compare versions using awk
