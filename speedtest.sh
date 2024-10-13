@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.0.5"
+SCRIPT_VERSION="2.0.6"
 
 # Define variables
 REMOTE_USER="root"                  # Remote server username
@@ -23,10 +23,15 @@ check_for_updates() {
 
     # Fetch the latest version of the script from GitHub
     curl -s -o "$TEMP_SCRIPT" "$REPO_RAW_URL"
-    LATEST_VERSION=$(grep "SCRIPT_VERSION=" "$TEMP_SCRIPT" | cut -d'"' -f2)
+    LATEST_VERSION=$(grep "^SCRIPT_VERSION=" "$TEMP_SCRIPT" | cut -d'"' -f2)
 
     echo -e "DEBUG: Fetched Latest Version: $LATEST_VERSION"
     echo -e "DEBUG: Current Version: $SCRIPT_VERSION"
+
+    if [ -z "$LATEST_VERSION" ]; then
+        echo -e "${RED}✖ Error: Failed to fetch the latest version.${NC}"
+        exit 1
+    fi
 
     if [ "$LATEST_VERSION" != "$SCRIPT_VERSION" ]; then
         echo -e "${YELLOW}Update available: $LATEST_VERSION${NC}"
@@ -162,11 +167,10 @@ RESULT="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$JITTER,$DOWNLOAD_SPEED,$UPLO
 # Save the results to the remote server
 sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "echo '$RESULT' >> $REMOTE_PATH"
 
-# Debugging info in case of any failure
-if [[ $? -ne 0 ]]; then
-    echo "✖ Error: Failed to save results to the remote server."
+if [ $? -eq 0 ]; then
+    echo -e "${CHECKMARK} ${GREEN}Results saved to the remote server.${NC}"
 else
-    echo "✔ Results saved to the remote server."
+    echo -e "${CROSS} ${RED}Error: Failed to save results to the remote server.${NC}"
 fi
 
 # Footer
