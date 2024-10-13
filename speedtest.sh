@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Main script version
-SCRIPT_VERSION="1.0.4"
+SCRIPT_VERSION="1.0.5"
 
 # Load other scripts (download them if necessary)
 download_file_if_needed() {
@@ -16,10 +16,10 @@ download_file_if_needed() {
 }
 
 # Download and load the scripts
-LATEST_ERROR_HANDLER_VERSION="1.0.4"
-LATEST_UPDATE_CHECK_VERSION="1.0.4"
-LATEST_RUN_SPEEDTEST_VERSION="1.0.4"
-LATEST_UTILS_VERSION="1.0.4"
+LATEST_ERROR_HANDLER_VERSION="1.0.5"
+LATEST_UPDATE_CHECK_VERSION="1.0.5"
+LATEST_RUN_SPEEDTEST_VERSION="1.0.5"
+LATEST_UTILS_VERSION="1.0.5"
 
 download_file_if_needed "error_handler.sh" LATEST_ERROR_HANDLER_VERSION
 download_file_if_needed "update_check.sh" LATEST_UPDATE_CHECK_VERSION
