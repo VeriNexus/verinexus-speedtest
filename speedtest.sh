@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.2.5"
+SCRIPT_VERSION="2.2.6"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -294,23 +294,6 @@ sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_
         echo '$HEADER_LINE' >> '$REMOTE_PATH'
     fi
 "
-
-# Run the SSH command with password authentication to save results
-echo -e "${BLUE}Running SSH command to save results...${NC}"
-ssh_attempts=0
-max_ssh_attempts=3
-while [ $ssh_attempts -lt $max_ssh_attempts ]; do
-    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" \
-    "echo '$RESULT_LINE' >> '$REMOTE_PATH'"
-    if [ $? -eq 0 ]; then
-        printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 7: Saving Results" "Results saved to the remote server."
-        break
-    else
-        log_error "Failed to save results to remote server. Retrying...($ssh_attempts)"
-        ssh_attempts=$((ssh_attempts + 1))
-        sleep 5
-    fi
-done
 
 # Run the SSH command with password authentication to save results
 echo -e "${BLUE}Running SSH command to save results...${NC}"
