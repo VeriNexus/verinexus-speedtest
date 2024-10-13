@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Main script version
-SCRIPT_VERSION="2.0.0"
+SCRIPT_VERSION="2.0.1"
 
 # Define remote server credentials and file path
 REMOTE_USER='root'
@@ -50,6 +50,11 @@ download_file_if_needed() {
 
 # Ensure proper version upgrade handling
 check_and_update_script() {
+    # Debug: Print current version and latest version variables
+    echo "DEBUG: Current Version: $SCRIPT_VERSION"
+    echo "DEBUG: Latest Version: $LATEST_MAIN_VERSION"
+    echo "DEBUG: Force Downgrade: $FORCE_DOWNGRADE"
+
     if [[ "$FORCE_DOWNGRADE" == "false" && "$LATEST_MAIN_VERSION" < "$SCRIPT_VERSION" ]]; then
         echo "Error: Downgrade detected! Use --forcedowngrade flag to allow downgrade."
         exit 1
