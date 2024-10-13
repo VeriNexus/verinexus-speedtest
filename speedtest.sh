@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.1.9"
+SCRIPT_VERSION="2.1.10"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -59,15 +59,19 @@ apply_forced_errors() {
          -H 'Expires: 0' \
          -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
 
-    # Check if the forced error file was successfully downloaded
+    # Debug: Print content of forced error file for verification
+    echo -e "${CYAN}Contents of Forced Error File:${NC}"
+    cat "$FORCED_ERROR_FILE"
+
+    # Check if the forced error file was successfully downloaded and its content
     if [ -s "$FORCED_ERROR_FILE" ]; then
         echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
         source "$FORCED_ERROR_FILE"
         # Debugging statements
         echo -e "${YELLOW}Applied Forced Errors:${NC}"
-        echo "FORCE_FAIL_PRIVATE_IP=$FORCE_FAIL_PRIVATE_IP"
-        echo "FORCE_FAIL_PUBLIC_IP=$FORCE_FAIL_PUBLIC_IP"
-        echo "FORCE_FAIL_MAC=$FORCE_FAIL_MAC"
+        echo "FORCE_FAIL_PRIVATE_IP=${FORCE_FAIL_PRIVATE_IP:-false}"
+        echo "FORCE_FAIL_PUBLIC_IP=${FORCE_FAIL_PUBLIC_IP:-false}"
+        echo "FORCE_FAIL_MAC=${FORCE_FAIL_MAC:-false}"
     else
         # If the forced error file was previously downloaded but no longer exists in the repo, remove it
         if [ -f "$FORCED_ERROR_FILE" ]; then
