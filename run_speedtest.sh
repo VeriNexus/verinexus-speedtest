@@ -1,45 +1,88 @@
 #!/bin/bash
 
-# Speedtest script version
-RUN_SPEEDTEST_VERSION="1.0.6"
+# Main script version
+SCRIPT_VERSION="1.0.6"
 
-run_speed_test() {
-    echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-    echo -e "${CYAN}│${NC}  Step 1: Running Speed Test  ${CYAN}│${NC}"
-    echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+# Function to download files if needed
+download_file_if_needed() {
+    local file_name=$1
+    local latest_version_var=$2
 
-    # Run the speed test with retry logic
-    SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
-    if [ $? -eq 0 ]; then
-        echo -e "${CHECKMARK} Speed Test completed successfully."
-    else
-        log_error "Speed Test failed."
-        return 1
-    fi
-
-    # Fetch and process date and time in UK timezone
-    echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-    echo -e "${CYAN}│${NC}  Step 2: Fetching Date and Time (UK Time)  ${CYAN}│${NC}"
-    echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
-
-    UK_DATE=$(TZ="Europe/London" date +"%Y-%m-%d")
-    UK_TIME=$(TZ="Europe/London" date +"%H:%M:%S")
-    echo -e "${CHECKMARK} Date (UK): ${YELLOW}$UK_DATE${NC}, Time (UK): ${YELLOW}$UK_TIME${NC}"
-
-    # Process and upload the results
-    echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-    echo -e "${CYAN}│${NC}  Step 3: Saving Results  ${CYAN}│${NC}"
-    echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
-
-    # Process the result for storage
-    SPEEDTEST_OUTPUT=$(echo "$SPEEDTEST_OUTPUT" | awk -F, -v date="$UK_DATE" -v time="$UK_TIME" '{OFS=","; print $1, $2, $3, date, time, $6, $7, $8, $9}')
-
-    # Upload the result to the remote server using sshpass
-    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "echo '$SPEEDTEST_OUTPUT' >> $REMOTE_PATH"
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${CHECKMARK} Results saved to the remote server."
-    else
-        log_error "Failed to save results to the remote server."
+    if [[ ! -f "./$file_name" ]] || [[ $(grep "$latest_version_var" "./$file_name" | cut -d'=' -f2 | tr -d '"') != "${!latest_version_var}" ]]; then
+        echo "Updating $file_name to the latest version..."
+        curl -s "https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/$file_name" -o "./$file_name"
+        chmod +x "./$file_name"
     fi
 }
+
+# Define latest versions for components
+LATEST_ERROR_HANDLER_VERSION="1.0.6"
+LATEST_UPDATE_CHECK_VERSION="1.0.6"
+LATEST_RUN_SPEEDTEST_VERSION="1.0.6"
+LATEST_UTILS_VERSION="1.0.6"
+
+# Download and load the latest scripts
+download_file_if_needed "error_handler.sh" LATEST_ERROR_HANDLER_VERSION
+download_file_if_needed "update_check.sh" LATEST_UPDATE_CHECK_VERSION
+download_file_if_needed "run_speedtest.sh" LATEST_RUN_SPEEDTEST_VERSION
+download_file_if_needed "utils.sh" LATEST_UTILS_VERSION
+
+# Source the updated scripts
+source ./error_handler.sh
+source ./update_check.sh
+source ./run_speedtest.sh
+source ./utils.sh
+
+# ANSI Color Codes and Symbols
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[1;36m'
+NC='\033[0m' # No Color
+CHECKMARK="${GREEN}✔${NC}"
+CROSS="${RED}✖${NC}"
+BOLD='\033[1m'
+
+# Fancy Progress Bar Function
+progress_bar() {
+    echo -n -e "["
+    for i in {1..50}; do
+        echo -n -e "${CYAN}#${NC}"
+        sleep 0.02
+    done
+    echo -e "]"
+}
+
+# Check for script updates
+check_for_updates
+
+# Display versions for all components
+echo -e "${CYAN}====================================================${NC}"
+echo -e "${BOLD}VeriNexus Speed Test Component Versions${NC}"
+echo -e "Main Script: ${YELLOW}${SCRIPT_VERSION}${NC} (Current) | ${YELLOW}${LATEST_MAIN_VERSION}${NC} (Latest)"
+echo -e "Error Handler: ${YELLOW}${ERROR_HANDLER_VERSION}${NC} (Current) | ${YELLOW}${LATEST_ERROR_HANDLER_VERSION}${NC} (Latest)"
+echo -e "Update Check: ${YELLOW}${UPDATE_CHECK_VERSION}${NC} (Current) | ${YELLOW}${LATEST_UPDATE_CHECK_VERSION}${NC} (Latest)"
+echo -e "Run Speed Test: ${YELLOW}${RUN_SPEEDTEST_VERSION}${NC} (Current) | ${YELLOW}${LATEST_RUN_SPEEDTEST_VERSION}${NC} (Latest)"
+echo -e "Utilities: ${YELLOW}${UTILS_VERSION}${NC} (Current) | ${YELLOW}${LATEST_UTILS_VERSION}${NC} (Latest)"
+echo -e "${CYAN}====================================================${NC}"
+
+# Apply any forced errors
+apply_forced_errors
+
+# Start the progress with a header
+echo -e "${BLUE}${BOLD}Starting VeriNexus Speed Test...${NC}"
+progress_bar
+
+# Start the speed test process
+run_speed_test
+
+# Log any errors if they occur
+if [ -n "$ERROR_LOG" ]; then
+    upload_error_log
+fi
+
+# Main script footer
+echo -e "${CYAN}====================================================${NC}"
+echo -e "${BOLD}VeriNexus Speed Test Completed Successfully!${NC}"
+echo -e "${CYAN}====================================================${NC}"
