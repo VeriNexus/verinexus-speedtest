@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.0.8"
+SCRIPT_VERSION="2.0.9"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -12,12 +12,12 @@ TEMP_SCRIPT="/tmp/latest_speedtest.sh"
 FORCED_ERROR_FILE="/tmp/force_error.txt"
 ERROR_LOG=""
 
-# SSH connection details (No password shown in the output)
+# SSH connection details (Password is securely stored and not displayed)
 REMOTE_USER="root"
 REMOTE_HOST="88.208.225.250"
 REMOTE_PATH="/speedtest/results/speedtest_results.csv"
 ERROR_LOG_PATH="/speedtest/results/error.txt"
-REMOTE_PASS='**@p3F_1$t'
+REMOTE_PASS='[REDACTED]'  # Remote server password (ensure this is securely stored)
 
 # ANSI Color Codes
 RED='\033[0;31m'
@@ -175,7 +175,7 @@ progress_bar
 
 # Step 1: Running Speed Test with retry logic
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│${NC}  Step 1: ${BOLD}Running Speed Test${NC}  ${CYAN}│${NC}"
+echo -e "${CYAN}│${NC}  Step 1: ${BOLD}Running Speed Test${NC}           ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
 if ! run_speed_test; then
@@ -184,7 +184,7 @@ fi
 
 # Step 2: Fetching Date and Time (UK Time - GMT/BST)
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│${NC}  Step 2: ${BOLD}Fetching Date and Time (UK Time)${NC}  ${CYAN}│${NC}"
+echo -e "${CYAN}│${NC}  Step 2: ${BOLD}Fetching Date and Time (UK Time)${NC} ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
 UK_DATE=$(TZ="Europe/London" date +"%Y-%m-%d")
@@ -193,7 +193,7 @@ echo -e "${CHECKMARK} Date (UK): ${YELLOW}$UK_DATE${NC}, Time (UK): ${YELLOW}$UK
 
 # Step 3: Fetching Private/Public IPs
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│${NC}  Step 3: ${BOLD}Fetching Private/Public IPs${NC}  ${CYAN}│${NC}"
+echo -e "${CYAN}│${NC}  Step 3: ${BOLD}Fetching Private/Public IPs${NC}    ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
 if [ "$FORCE_FAIL_PRIVATE_IP" = true ]; then
@@ -214,7 +214,7 @@ echo -e "${CHECKMARK} Private IP: ${YELLOW}$PRIVATE_IP${NC}, Public IP: ${YELLOW
 
 # Step 4: Fetching MAC Address
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│${NC}  Step 4: ${BOLD}Fetching MAC Address${NC}  ${CYAN}│${NC}"
+echo -e "${CYAN}│${NC}  Step 4: ${BOLD}Fetching MAC Address${NC}          ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
 ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
@@ -231,7 +231,7 @@ fi
 
 # Step 5: Converting Speed Results
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│${NC}  Step 5: ${BOLD}Converting Speed Results${NC}  ${CYAN}│${NC}"
+echo -e "${CYAN}│${NC}  Step 5: ${BOLD}Converting Speed Results${NC}      ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
 DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $7 / 1000000}')
@@ -240,7 +240,7 @@ echo -e "${CHECKMARK} Download Speed: ${GREEN}$DOWNLOAD_SPEED Mbps${NC}, Upload 
 
 # Step 6: Extracting Shareable ID
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│${NC}  Step 6: ${BOLD}Extracting Shareable ID${NC}  ${CYAN}│${NC}"
+echo -e "${CYAN}│${NC}  Step 6: ${BOLD}Extracting Shareable ID${NC}       ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
 SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
@@ -249,7 +249,7 @@ echo -e "${CHECKMARK} Shareable ID: ${YELLOW}$SHARE_ID${NC}"
 
 # Step 7: Saving Results
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│${NC}  Step 7: ${BOLD}Saving Results${NC}  ${CYAN}│${NC}"
+echo -e "${CYAN}│${NC}  Step 7: ${BOLD}Saving Results${NC}                ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
 HOSTNAME=$(hostname)
@@ -261,7 +261,7 @@ JITTER=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')
 
 RESULT_LINE="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$JITTER,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$SHARE_ID,$PRIVATE_IP,$PUBLIC_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
 
-# Run the SSH command (Password not shown in output)
+# Run the SSH command (Password is securely stored and not displayed)
 echo -e "${BLUE}Running SSH command...${NC}"
 echo "$RESULT_LINE" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "cat >> $REMOTE_PATH"
 
