@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Main script version
-SCRIPT_VERSION="1.1.6"
+SCRIPT_VERSION="2.0.0"
 
 # Define remote server credentials and file path
 REMOTE_USER='root'
@@ -9,27 +9,33 @@ REMOTE_HOST='88.208.225.250'
 REMOTE_PATH='/speedtest/results/speedtest_results.csv'
 REMOTE_PASS='**@p3F_1$t'
 
-# Function to download files if needed, with caching disabled
+# Flag to allow forced downgrade
+FORCE_DOWNGRADE=false
+
+# Parse arguments for forced downgrade
+for arg in "$@"
+do
+    if [[ "$arg" == "--forcedowngrade" ]]; then
+        FORCE_DOWNGRADE=true
+    fi
+done
+
+# Function to download files with cache flush and forced downgrade handling
 download_file_if_needed() {
     local file_name=$1
     local latest_version_var=$2
 
     echo "Checking for updates for $file_name..."
-    # Dynamically check the latest version from the file
     local current_version=$(grep "_VERSION" "./$file_name" | grep -o '[0-9.]\+')
-    
-    if [[ ! -f "./$file_name" ]] || [[ "$current_version" != "${!latest_version_var}" ]]; then
+
+    # Version comparison logic
+    if [[ ! -f "./$file_name" ]] || [[ "$FORCE_DOWNGRADE" == "true" ]] || [[ "$current_version" < "${!latest_version_var}" ]]; then
         echo "Updating $file_name to the latest version ($current_version -> ${!latest_version_var})..."
-
-        # Add a timestamp to the URL to avoid caching
-        local timestamp=$(date +%s)
-
-        # Correct curl command syntax
         curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
              -H 'Pragma: no-cache' \
              -H 'Expires: 0' \
              -o "./$file_name" \
-             "https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/$file_name?t=$timestamp"
+             "https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/$file_name?t=$(date +%s)"
 
         if [[ $? -eq 0 ]]; then
             echo "$file_name downloaded successfully."
@@ -42,18 +48,22 @@ download_file_if_needed() {
     fi
 }
 
-# Ensure version comparison doesn't keep looping
+# Ensure proper version upgrade handling
 check_and_update_script() {
+    if [[ "$FORCE_DOWNGRADE" == "false" && "$LATEST_MAIN_VERSION" < "$SCRIPT_VERSION" ]]; then
+        echo "Error: Downgrade detected! Use --forcedowngrade flag to allow downgrade."
+        exit 1
+    fi
+    
     if [[ "$LATEST_MAIN_VERSION" != "$SCRIPT_VERSION" ]]; then
         echo "Update available for main script: $LATEST_MAIN_VERSION"
         echo "Downloading the latest version..."
-        
         curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
              -H 'Pragma: no-cache' \
              -H 'Expires: 0' \
              -o "./speedtest.sh" \
              "https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh?t=$(date +%s)"
-        
+
         if [[ $? -eq 0 ]]; then
             echo "Update downloaded to version $LATEST_MAIN_VERSION. Please re-run the script."
             chmod +x "./speedtest.sh"
@@ -72,14 +82,7 @@ LATEST_UPDATE_CHECK_VERSION="1.1.3"
 LATEST_RUN_SPEEDTEST_VERSION="1.1.1"
 LATEST_UTILS_VERSION="1.0.6"
 
-# Debug: Print current script version and component versions
-echo "DEBUG: Main Script Version: $SCRIPT_VERSION"
-echo "DEBUG: LATEST_ERROR_HANDLER_VERSION: $LATEST_ERROR_HANDLER_VERSION"
-echo "DEBUG: LATEST_UPDATE_CHECK_VERSION: $LATEST_UPDATE_CHECK_VERSION"
-echo "DEBUG: LATEST_RUN_SPEEDTEST_VERSION: $LATEST_RUN_SPEEDTEST_VERSION"
-echo "DEBUG: LATEST_UTILS_VERSION: $LATEST_UTILS_VERSION"
-
-# Check for updates and only download if there is a new version
+# Check for updates and only download if there is a new version or force flag
 check_and_update_script
 
 # Download and load the latest scripts
@@ -124,9 +127,6 @@ echo -e "Update Check: ${YELLOW}${UPDATE_CHECK_VERSION}${NC} (Current) | ${YELLO
 echo -e "Run Speed Test: ${YELLOW}${RUN_SPEEDTEST_VERSION}${NC} (Current) | ${YELLOW}${LATEST_RUN_SPEEDTEST_VERSION}${NC} (Latest)"
 echo -e "Utilities: ${YELLOW}${UTILS_VERSION}${NC} (Current) | ${YELLOW}${LATEST_UTILS_VERSION}${NC} (Latest)"
 echo -e "${CYAN}====================================================${NC}"
-
-# Apply any forced errors
-apply_forced_errors
 
 # Start the progress with a header
 echo -e "${BLUE}${BOLD}Starting VeriNexus Speed Test...${NC}"
