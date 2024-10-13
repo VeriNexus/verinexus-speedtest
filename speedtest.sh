@@ -1,15 +1,17 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.1.8"
+SCRIPT_VERSION="2.2"
 
-# GitHub repository raw URLs for the script and forced error file
+# GitHub repository raw URLs for the script, forced error file, and force update file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
 FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
+FORCE_UPDATE_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_update.txt"
 
 # Temporary files for comparison and forced error
 TEMP_SCRIPT="/tmp/latest_speedtest.sh"
 FORCED_ERROR_FILE="/tmp/force_error.txt"
+FORCE_UPDATE_FILE="/tmp/force_update.txt"
 ERROR_LOG=""
 MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
 
@@ -50,29 +52,22 @@ log_error() {
     echo -e "${CROSS} ${RED}Error: $error_message${NC}"
 }
 
-# Function to check for forced error file and apply its effects
-apply_forced_errors() {
-    # Download the forced error file with cache control to prevent caching
+# Function to check for force update file and apply update if found
+check_for_force_update() {
+    echo -e "${CYAN}Checking for force update...${NC}"
     curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
          -H 'Pragma: no-cache' \
          -H 'Expires: 0' \
-         -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
+         -s -o "$FORCE_UPDATE_FILE" "$FORCE_UPDATE_URL"
 
-    # Check if the forced error file was successfully downloaded
-    if [ -s "$FORCED_ERROR_FILE" ]; then
-        echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
-        source "$FORCED_ERROR_FILE"
-        # Debugging statements
-        echo -e "${YELLOW}Applied Forced Errors:${NC}"
-        echo "FORCE_FAIL_PRIVATE_IP=$FORCE_FAIL_PRIVATE_IP"
-        echo "FORCE_FAIL_PUBLIC_IP=$FORCE_FAIL_PUBLIC_IP"
-        echo "FORCE_FAIL_MAC=$FORCE_FAIL_MAC"
+    if [ -s "$FORCE_UPDATE_FILE" ]; then
+        echo -e "${RED}Force update file found. Forcing update to the latest version...${NC}"
+        rm -f "$FORCE_UPDATE_FILE"
+        check_for_updates
+        exit 0
     else
-        # If the forced error file was previously downloaded but no longer exists in the repo, remove it
-        if [ -f "$FORCED_ERROR_FILE" ]; then
-            echo -e "${YELLOW}Forced error file removed from GitHub. Deleting local copy...${NC}"
-            rm -f "$FORCED_ERROR_FILE"
-        fi
+        echo -e "${GREEN}✔ No force update file found.${NC}"
+        rm -f "$FORCE_UPDATE_FILE"
     fi
 }
 
@@ -163,6 +158,28 @@ run_speed_test() {
     done
     return 1  # Fail if all attempts failed
 }
+
+# Function to check for forced error file and apply its effects
+apply_forced_errors() {
+    curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
+         -H 'Pragma: no-cache' \
+         -H 'Expires: 0' \
+         -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
+
+    if [ -s "$FORCED_ERROR_FILE" ]; then
+        echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
+        source "$FORCED_ERROR_FILE"
+        echo -e "${YELLOW}Applied Forced Errors:${NC}"
+        echo "FORCE_FAIL_PRIVATE_IP=$FORCE_FAIL_PRIVATE_IP"
+        echo "FORCE_FAIL_PUBLIC_IP=$FORCE_FAIL_PUBLIC_IP"
+        echo "FORCE_FAIL_MAC=$FORCE_FAIL_MAC"
+    else
+        echo -e "${GREEN}No forced error file found.${NC}"
+    fi
+}
+
+# Start by checking for force updates
+check_for_force_update
 
 # Apply any forced errors
 apply_forced_errors
