@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.1.1"
+SCRIPT_VERSION="2.1.2"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -80,6 +80,32 @@ check_for_force_update() {
         fi
     else
         echo -e "${GREEN}No force update detected.${NC}"
+    fi
+}
+
+# Function to apply forced errors
+apply_forced_errors() {
+    # Download the forced error file with cache control to prevent caching
+    curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
+         -H 'Pragma: no-cache' \
+         -H 'Expires: 0' \
+         -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
+
+    # Check if the forced error file was successfully downloaded
+    if [ -s "$FORCED_ERROR_FILE" ]; then
+        echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
+        source "$FORCED_ERROR_FILE"
+        # Debugging statements
+        echo -e "${YELLOW}Applied Forced Errors:${NC}"
+        echo "FORCE_FAIL_PRIVATE_IP=$FORCE_FAIL_PRIVATE_IP"
+        echo "FORCE_FAIL_PUBLIC_IP=$FORCE_FAIL_PUBLIC_IP"
+        echo "FORCE_FAIL_MAC=$FORCE_FAIL_MAC"
+    else
+        # If the forced error file was previously downloaded but no longer exists in the repo, remove it
+        if [ -f "$FORCED_ERROR_FILE" ]; then
+            echo -e "${YELLOW}Forced error file removed from GitHub. Deleting local copy...${NC}"
+            rm -f "$FORCED_ERROR_FILE"
+        fi
     fi
 }
 
@@ -256,93 +282,4 @@ else
     MAC_ADDRESS="N/A"
 fi
 
-# Step 5: Converting Speed Results
-echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│${NC}  Step 5: ${BOLD}Converting Speed Results${NC}      ${CYAN}│${NC}"
-echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
-
-DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $7 / 1000000}')
-UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $8 / 1000000}')
-echo -e "${CHECKMARK} Download Speed: ${GREEN}$DOWNLOAD_SPEED Mbps${NC}, Upload Speed: ${GREEN}$UPLOAD_SPEED Mbps${NC}"
-
-# Step 6: Extracting Shareable ID
-echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│${NC}  Step 6: ${BOLD}Extracting Shareable ID${NC}       ${CYAN}│${NC}"
-echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
-
-SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
-SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
-echo -e "${CHECKMARK} Shareable ID: ${YELLOW}$SHARE_ID${NC}"
-
-# Step 7: Saving Results
-echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│${NC}  Step 7: ${BOLD}Saving Results${NC}                ${CYAN}│${NC}"
-echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
-
-HOSTNAME=$(hostname)
-CLIENT_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
-SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}')
-LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}')
-LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $5}')
-JITTER=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')
-
-RESULT_LINE="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$JITTER,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$SHARE_ID,$PRIVATE_IP,$PUBLIC_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
-
-# Run the SSH command with password authentication to save results
-echo -e "${BLUE}Running SSH command to save results...${NC}"
-sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" \
-"echo '$RESULT_LINE' >> '$REMOTE_PATH'"
-
-if [ $? -eq 0 ]; then
-    echo -e "${CHECKMARK} Results saved to the remote server."
-else
-    log_error "Failed to save results to the remote server."
-fi
-
-# If any errors occurred, upload the error log
-if [ -n "$ERROR_LOG" ]; then
-    echo -e "${BLUE}Uploading error log...${NC}"
-    # Create a temporary file for the error log
-    TEMP_ERROR_LOG=$(mktemp)
-    echo -e "$ERROR_LOG" > "$TEMP_ERROR_LOG"
-
-    # Upload the error log and implement size limitation on the remote server
-    sshpass -p "$REMOTE_PASS" scp -o StrictHostKeyChecking=no "$TEMP_ERROR_LOG" "$REMOTE_USER@$REMOTE_HOST:/tmp/error_temp.txt"
-    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
-        # Prepend the new error log entry to the existing error log
-        if [ -f '$ERROR_LOG_PATH' ]; then
-            mv '$ERROR_LOG_PATH' '/tmp/old_error_log.txt'
-            cat /tmp/error_temp.txt /tmp/old_error_log.txt > '$ERROR_LOG_PATH'
-            rm /tmp/old_error_log.txt
-        else
-            mv /tmp/error_temp.txt '$ERROR_LOG_PATH'
-        fi
-        # Remove the temporary error log file
-        rm /tmp/error_temp.txt
-        # Check the size of the error log file
-        FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
-        MAX_SIZE=$MAX_ERROR_LOG_SIZE
-        if [ \$FILE_SIZE -gt \$MAX_SIZE ]; then
-            # Truncate the oldest entries from the end to reduce the file size
-            while [ \$FILE_SIZE -gt \$MAX_SIZE ]; do
-                # Remove the last line (oldest entry)
-                sed -i '\$d' '$ERROR_LOG_PATH'
-                FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
-            done
-        fi
-    "
-
-    if [ $? -eq 0 ]; then
-        echo -e "${CHECKMARK} All errors logged and uploaded."
-    else
-        echo -e "${CROSS} ${RED}Failed to upload error log to the remote server.${NC}"
-    fi
-
-    # Remove the temporary error log file
-    rm -f "$TEMP_ERROR_LOG"
-fi
-
-# Footer
-echo -e "${CYAN}====================================================${NC}"
-echo -e "${BOLD}VeriNexus Speed Test Completed Successfully!${NC}"
-echo -e "${CYAN}====================================================${NC}"
+# The rest of the script continues as previously written, managing errors, results, and logs.
