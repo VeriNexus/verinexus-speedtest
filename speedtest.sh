@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.0.9"
+SCRIPT_VERSION="2.0.10"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -12,12 +12,12 @@ TEMP_SCRIPT="/tmp/latest_speedtest.sh"
 FORCED_ERROR_FILE="/tmp/force_error.txt"
 ERROR_LOG=""
 
-# SSH connection details (Password is securely stored and not displayed)
+# SSH connection details (Password included as per your request)
 REMOTE_USER="root"
 REMOTE_HOST="88.208.225.250"
 REMOTE_PATH="/speedtest/results/speedtest_results.csv"
 ERROR_LOG_PATH="/speedtest/results/error.txt"
-REMOTE_PASS='[REDACTED]'  # Remote server password (ensure this is securely stored)
+REMOTE_PASS='**@p3F_1$t'  # Replace this with your actual password if different
 
 # ANSI Color Codes
 RED='\033[0;31m'
@@ -261,7 +261,7 @@ JITTER=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')
 
 RESULT_LINE="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$JITTER,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$SHARE_ID,$PRIVATE_IP,$PUBLIC_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
 
-# Run the SSH command (Password is securely stored and not displayed)
+# Run the SSH command with password authentication
 echo -e "${BLUE}Running SSH command...${NC}"
 echo "$RESULT_LINE" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "cat >> $REMOTE_PATH"
 
