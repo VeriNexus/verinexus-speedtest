@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.1.9"
+SCRIPT_VERSION="2.2.0"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
-FORCED_ERROR_URL="https://raw.githubusercontent.com/Verinexus/verinexus-speedtest/main/force_error.txt"
+FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
 
 # Temporary files for comparison and forced error
 TEMP_SCRIPT="/tmp/latest_speedtest.sh"
@@ -167,14 +167,18 @@ run_speed_test() {
         SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
         if [ $? -eq 0 ]; then
             echo -e "${CHECKMARK} Speed Test completed successfully."
-            return 0
+            break
         else
             log_error "Speed Test failed on attempt $((attempts+1))."
             attempts=$((attempts+1))
             sleep 5  # Wait before retrying
         fi
     done
-    return 1  # Fail if all attempts failed
+
+    if [ $attempts -eq $max_attempts ]; then
+        return 1  # Fail if all attempts failed
+    fi
+    return 0
 }
 
 # Apply any forced errors
@@ -204,7 +208,11 @@ echo -e "${BLUE}${BOLD}Starting VeriNexus Speed Test...${NC}"
 progress_bar
 
 # Step 1: Running Speed Test with retry logic
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 1: Running Speed Test" "Speed Test completed successfully."
+run_speed_test
+if [ $? -ne 0 ]; then
+    log_error "Speed Test failed after maximum attempts."
+    exit 1
+fi
 
 # Step 2: Fetching Date and Time (UK Time - GMT/BST)
 UK_DATE=$(TZ="Europe/London" date +"%Y-%m-%d")
@@ -266,8 +274,8 @@ RESULT_LINE="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$JITTER,$DOWNLOAD_SPEED,
 
 # Run the SSH command with password authentication to save results
 echo -e "${BLUE}Running SSH command to save results...${NC}"
-local ssh_attempts=0
-local max_ssh_attempts=3
+ssh_attempts=0
+max_ssh_attempts=3
 while [ $ssh_attempts -lt $max_ssh_attempts ]; do
     sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" \
     "echo '$RESULT_LINE' >> '$REMOTE_PATH'"
