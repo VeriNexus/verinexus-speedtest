@@ -1,36 +1,47 @@
 #!/bin/bash
 
 # Main script version
-SCRIPT_VERSION="1.1.2"
+SCRIPT_VERSION="1.1.4"
 
 # Define remote server credentials and file path
-REMOTE_USER='root'             # Your remote SSH username
-REMOTE_HOST='88.208.225.250'   # Your remote server IP or hostname
-REMOTE_PATH='/speedtest/results/speedtest_results.csv'  # Path to the CSV file on the remote server
-REMOTE_PASS='**@p3F_1$t'       # SSH password with single quotes
+REMOTE_USER='root'
+REMOTE_HOST='88.208.225.250'
+REMOTE_PATH='/speedtest/results/speedtest_results.csv'
+REMOTE_PASS='**@p3F_1$t'
 
-# Function to download files if needed
+# Function to download files if needed, with caching disabled
 download_file_if_needed() {
     local file_name=$1
     local latest_version_var=$2
 
     echo "Checking for updates for $file_name..."
-    if [[ ! -f "./$file_name" ]] || [[ $(grep "$latest_version_var" "./$file_name" | cut -d'=' -f2 | tr -d '"') != "${!latest_version_var}" ]]; then
-        echo "Updating $file_name to the latest version..."
-        curl -s -o "./$file_name" "https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/$file_name"
+    # Dynamically check the latest version from the file
+    local current_version=$(grep "_VERSION" "./$file_name" | grep -o '[0-9.]\+')
+    
+    if [[ ! -f "./$file_name" ]] || [[ "$current_version" != "${!latest_version_var}" ]]; then
+        echo "Updating $file_name to the latest version ($current_version -> ${!latest_version_var})..."
+
+        # Add a timestamp to the URL to avoid caching
+        local timestamp=$(date +%s)
+
+        curl -s -H 'Cache-Control: no-cache, no-store, must-revalidate' \
+             -H 'Pragma: no-cache' \
+             -H 'Expires: 0' \
+             -o "./$file_name" \
+             "https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/$file_name?t=$timestamp"
         chmod +x "./$file_name"
     else
         echo "$file_name is already up to date."
     fi
 }
 
-# Define latest versions for components
+# Define the latest versions for each component
 LATEST_ERROR_HANDLER_VERSION="1.0.6"
-LATEST_UPDATE_CHECK_VERSION="1.0.6"
+LATEST_UPDATE_CHECK_VERSION="1.1.3"
 LATEST_RUN_SPEEDTEST_VERSION="1.1.1"
 LATEST_UTILS_VERSION="1.0.6"
 
-# Debug: print version variables before downloading updates
+# Debug: Print current script version and component versions
 echo "DEBUG: Main Script Version: $SCRIPT_VERSION"
 echo "DEBUG: LATEST_ERROR_HANDLER_VERSION: $LATEST_ERROR_HANDLER_VERSION"
 echo "DEBUG: LATEST_UPDATE_CHECK_VERSION: $LATEST_UPDATE_CHECK_VERSION"
@@ -42,27 +53,6 @@ download_file_if_needed "error_handler.sh" LATEST_ERROR_HANDLER_VERSION
 download_file_if_needed "update_check.sh" LATEST_UPDATE_CHECK_VERSION
 download_file_if_needed "run_speedtest.sh" LATEST_RUN_SPEEDTEST_VERSION
 download_file_if_needed "utils.sh" LATEST_UTILS_VERSION
-
-# Debug: Verify that each script was downloaded and is executable
-if [[ ! -x "./error_handler.sh" ]]; then
-    echo "ERROR: error_handler.sh is not executable!"
-    exit 1
-fi
-
-if [[ ! -x "./update_check.sh" ]]; then
-    echo "ERROR: update_check.sh is not executable!"
-    exit 1
-fi
-
-if [[ ! -x "./run_speedtest.sh" ]]; then
-    echo "ERROR: run_speedtest.sh is not executable!"
-    exit 1
-fi
-
-if [[ ! -x "./utils.sh" ]]; then
-    echo "ERROR: utils.sh is not executable!"
-    exit 1
-fi
 
 # Source the updated scripts
 source ./error_handler.sh
@@ -92,11 +82,7 @@ progress_bar() {
 }
 
 # Check for script updates
-echo "Checking for updates for the main script..."
 check_for_updates
-
-# Debug: print component versions after update check
-echo "DEBUG: Main Script Version after update check: $SCRIPT_VERSION"
 
 # Display versions for all components
 echo -e "${CYAN}====================================================${NC}"
