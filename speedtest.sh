@@ -1,27 +1,24 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.2.2"  # Incremented version
+SCRIPT_VERSION="2.2.3"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
-FORCED_ERROR_URL="https://raw.githubusercontent.com/VerinNexus/verinexus-speedtest/main/force_error.txt"
+FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
 
-# Paths for remote and local files
+# Temporary files for comparison, forced error, and force update
 TEMP_SCRIPT="/tmp/latest_speedtest.sh"
 FORCED_ERROR_FILE="/tmp/force_error.txt"
-LOCAL_FORCE_UPDATE_FILE="/tmp/force_update.txt"
+FORCE_UPDATE_FILE="/tmp/force_update.txt"
+FORCE_UPDATE_TRACKER="/tmp/force_update_tracker.txt"
 
 # SSH connection details
 REMOTE_USER="root"
 REMOTE_HOST="88.208.225.250"
-REMOTE_PASS='**@p3F_1$t'  # Password for SSH access
 REMOTE_PATH="/speedtest/results/speedtest_results.csv"
 ERROR_LOG_PATH="/speedtest/results/error.txt"
-FORCE_UPDATE_SSH_PATH="/speedtest/update_files/force_update.txt"
-
-ERROR_LOG=""
-MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
+REMOTE_PASS='**@p3F_1$t'  # Password included as per your request
 
 # ANSI Color Codes
 RED='\033[0;31m'
@@ -53,25 +50,33 @@ log_error() {
     echo -e "${CROSS} ${RED}Error: $error_message${NC}"
 }
 
-# Function to check for forced error file and apply its effects
+# Function to check if forced update has been applied for the current version
+check_force_update_tracker() {
+    if [ -f "$FORCE_UPDATE_TRACKER" ]; then
+        APPLIED_VERSION=$(cat "$FORCE_UPDATE_TRACKER")
+        if [ "$APPLIED_VERSION" == "$SCRIPT_VERSION" ]; then
+            echo -e "${GREEN}✔ Force update already applied for version $SCRIPT_VERSION.${NC}"
+            return 1
+        fi
+    fi
+    return 0
+}
+
+# Function to apply forced errors if forced error file exists
 apply_forced_errors() {
-    # Download the forced error file with cache control to prevent caching
     curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
          -H 'Pragma: no-cache' \
          -H 'Expires: 0' \
          -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
 
-    # Check if the forced error file was successfully downloaded
     if [ -s "$FORCED_ERROR_FILE" ]; then
         echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
         source "$FORCED_ERROR_FILE"
-        # Debugging statements
         echo -e "${YELLOW}Applied Forced Errors:${NC}"
         echo "FORCE_FAIL_PRIVATE_IP=$FORCE_FAIL_PRIVATE_IP"
         echo "FORCE_FAIL_PUBLIC_IP=$FORCE_FAIL_PUBLIC_IP"
         echo "FORCE_FAIL_MAC=$FORCE_FAIL_MAC"
     else
-        # If the forced error file was previously downloaded but no longer exists in the repo, remove it
         if [ -f "$FORCED_ERROR_FILE" ]; then
             echo -e "${YELLOW}Forced error file removed from GitHub. Deleting local copy...${NC}"
             rm -f "$FORCED_ERROR_FILE"
@@ -98,16 +103,14 @@ version_gt() {
     }'
 }
 
-# Function to check for updates with cache control and version check
+# Function to check for script updates
 check_for_updates() {
     echo -e "${CYAN}====================================================${NC}"
     echo -e "           ${BOLD}Checking for Script Updates...${NC}"
     echo -e "${CYAN}====================================================${NC}"
 
-    # Clear any previous version of the file
     rm -f "$TEMP_SCRIPT"
 
-    # Download the latest version of the script with cache control headers
     curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
          -H 'Pragma: no-cache' \
          -H 'Expires: 0' \
@@ -118,13 +121,11 @@ check_for_updates() {
         return 1
     fi
 
-    # Ensure the downloaded file is valid
     if [ ! -s "$TEMP_SCRIPT" ]; then
         log_error "Downloaded script is empty."
         return 1
     fi
 
-    # Extract version from the downloaded script
     LATEST_VERSION=$(grep -oP 'SCRIPT_VERSION="\K[0-9.]+' "$TEMP_SCRIPT")
     if [ -z "$LATEST_VERSION" ]; then
         log_error "Failed to extract version from the downloaded script."
@@ -134,7 +135,6 @@ check_for_updates() {
     echo -e "${CHECKMARK} Current version: ${YELLOW}$SCRIPT_VERSION${NC}"
     echo -e "${CHECKMARK} Latest version: ${YELLOW}$LATEST_VERSION${NC}"
 
-    # Compare versions to check if we should upgrade
     if version_gt "$LATEST_VERSION" "$SCRIPT_VERSION"; then
         echo -e "${YELLOW}New version available: $LATEST_VERSION${NC}"
         cp "$TEMP_SCRIPT" "$0"
@@ -148,63 +148,44 @@ check_for_updates() {
     echo -e "${CYAN}====================================================${NC}"
 }
 
-# Retry function to retry the speed test in case of failure
-run_speed_test() {
-    local attempts=0
-    local max_attempts=3
-    while [ $attempts -lt $max_attempts ]; do
-        echo -e "${BLUE}Attempting speed test (Attempt $((attempts+1)) of $max_attempts)...${NC}"
-        SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
-        if [ $? -eq 0 ]; then
-            echo -e "${CHECKMARK} Speed Test completed successfully."
-            return 0
-        else
-            log_error "Speed Test failed on attempt $((attempts+1))."
-            attempts=$((attempts+1))
-            sleep 5  # Wait before retrying
-        fi
-    done
-    return 1  # Fail if all attempts failed
-}
-
-# Force update check
+# Function to check for force update
 check_force_update() {
-    echo -e "${BLUE}Checking for force update via SSH...${NC}"
+    echo -e "${BLUE}Checking for force update...${NC}"
 
-    # Remove any legacy local force update files
-    rm -f "$LOCAL_FORCE_UPDATE_FILE"
-
-    # Step 1: Establish SSH connection and download the force update file
-    sshpass -p "$REMOTE_PASS" scp -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST:$FORCE_UPDATE_SSH_PATH" "$LOCAL_FORCE_UPDATE_FILE"
-
-    if [ $? -ne 0 ]; then
-        echo -e "${CROSS} ${RED}Error: Failed to download force update file via SSH. Treating as no update required.${NC}"
-        return 0
+    if [[ "$1" == "--force-update" ]]; then
+        echo -e "${RED}Forcing update...${NC}"
+        check_for_updates
+        echo "$SCRIPT_VERSION" > "$FORCE_UPDATE_TRACKER"
+        return
     fi
 
-    # Step 2: Check the contents of the downloaded file
-    if [ -s "$LOCAL_FORCE_UPDATE_FILE" ]; then
-        CONTENT=$(cat "$LOCAL_FORCE_UPDATE_FILE")
-        echo -e "${YELLOW}Loaded force update file content: ${CONTENT}${NC}"
-        if [[ "$CONTENT" == "true" ]]; then
+    check_force_update_tracker
+    if [ $? -eq 1 ]; then
+        return
+    fi
+
+    sshpass -p "$REMOTE_PASS" scp -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST:/speedtest/update_files/force_update.txt" "$FORCE_UPDATE_FILE"
+
+    if [ -s "$FORCE_UPDATE_FILE" ]; then
+        FORCE_UPDATE_CONTENT=$(cat "$FORCE_UPDATE_FILE")
+        if [[ "$FORCE_UPDATE_CONTENT" == "true" ]]; then
             echo -e "${RED}Force update required. Proceeding with update...${NC}"
             check_for_updates
+            echo "$SCRIPT_VERSION" > "$FORCE_UPDATE_TRACKER"
         else
             echo -e "${GREEN}✔ No force update required.${NC}"
         fi
+        rm -f "$FORCE_UPDATE_FILE"
     else
-        echo -e "${CROSS} ${RED}Error: Force update file is empty or invalid. No update required.${NC}"
+        echo -e "${CROSS} Error: Failed to download force update file. Treating as no update required.${NC}"
     fi
-
-    # Clean up the local file after processing
-    rm -f "$LOCAL_FORCE_UPDATE_FILE"
 }
 
 # Apply any forced errors
 apply_forced_errors
 
 # Call the force update check
-check_force_update
+check_force_update "$1"
 
 # Display Title with a Frame
 echo -e "${CYAN}====================================================${NC}"
@@ -235,32 +216,14 @@ UK_TIME=$(TZ="Europe/London" date +"%H:%M:%S")
 printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 2: Fetching Date and Time (UK Time)" "Date (UK): $UK_DATE, Time (UK): $UK_TIME"
 
 # Step 3: Fetching Private/Public IPs
-if [ "$FORCE_FAIL_PRIVATE_IP" = true ]; then
-    log_error "Forced failure to fetch Private IP."
-    PRIVATE_IP="N/A"
-else
-    PRIVATE_IP=$(hostname -I | awk '{print $1}')
-fi
-
-if [ "$FORCE_FAIL_PUBLIC_IP" = true ]; then
-    log_error "Forced failure to fetch Public IP."
-    PUBLIC_IP="N/A"
-else
-    PUBLIC_IP=$(curl -s ifconfig.co)
-fi
+PRIVATE_IP=$(hostname -I | awk '{print $1}')
+PUBLIC_IP=$(curl -s ifconfig.co)
 printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 3: Fetching Private/Public IPs" "Private IP: $PRIVATE_IP, Public IP: $PUBLIC_IP"
 
 # Step 4: Fetching MAC Address
 ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
-if [ "$FORCE_FAIL_MAC" = true ]; then
-    log_error "Forced failure to fetch MAC Address."
-    MAC_ADDRESS="N/A"
-elif [ -n "$ACTIVE_IFACE" ]; then
-    MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
-    printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 4: Fetching MAC Address" "MAC Address: $MAC_ADDRESS"
-else
-    log_error "Could not determine active network interface."
-fi
+MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
+printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 4: Fetching MAC Address" "MAC Address: $MAC_ADDRESS"
 
 # Step 5: Converting Speed Results
 DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $7 / 1000000}')
@@ -273,60 +236,14 @@ SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
 printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 6: Extracting Shareable ID" "Shareable ID: $SHARE_ID"
 
 # Step 7: Saving Results
-HOSTNAME=$(hostname)
-CLIENT_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
-SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}')
-LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}')
-LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $5}')
-JITTER=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')
-
 RESULT_LINE="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$JITTER,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$SHARE_ID,$PRIVATE_IP,$PUBLIC_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
-
-# Run the SSH command with password authentication to save results
 echo -e "${BLUE}Running SSH command to save results...${NC}"
 sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" \
 "echo '$RESULT_LINE' >> '$REMOTE_PATH'"
-
 if [ $? -eq 0 ]; then
     printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 7: Saving Results" "Results saved to the remote server."
 else
     log_error "Failed to save results to the remote server."
-fi
-
-# If any errors occurred, upload the error log
-if [ -n "$ERROR_LOG" ]; then
-    echo -e "${BLUE}Uploading error log...${NC}"
-    # Create a temporary file for the error log
-    TEMP_ERROR_LOG=$(mktemp)
-    echo -e "$ERROR_LOG" > "$TEMP_ERROR_LOG"
-
-    # Upload the error log and implement size limitation on the remote server
-    sshpass -p "$REMOTE_PASS" scp -o StrictHostKeyChecking=no "$TEMP_ERROR_LOG" "$REMOTE_USER@$REMOTE_HOST:/tmp/error_temp.txt"
-    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
-        if [ -f '$ERROR_LOG_PATH' ]; then
-            mv '$ERROR_LOG_PATH' '/tmp/old_error_log.txt'
-            cat /tmp/error_temp.txt /tmp/old_error_log.txt > '$ERROR_LOG_PATH'
-            rm /tmp/old_error_log.txt
-        else
-            mv /tmp/error_temp.txt '$ERROR_LOG_PATH'
-        fi
-        rm /tmp/error_temp.txt
-        FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
-        MAX_SIZE=$MAX_ERROR_LOG_SIZE
-        if [ \$FILE_SIZE -gt \$MAX_SIZE ]; then
-            while [ \$FILE_SIZE -gt \$MAX_SIZE ]; do
-                sed -i '\$d' '$ERROR_LOG_PATH'
-                FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
-            done
-        fi
-    "
-
-    if [ $? -eq 0 ]; then
-        echo -e "${CHECKMARK} All errors logged and uploaded."
-    else
-        echo -e "${CROSS} ${RED}Failed to upload error log to the remote server.${NC}"
-    fi
-    rm -f "$TEMP_ERROR_LOG"
 fi
 
 # Footer
