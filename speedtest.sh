@@ -9,6 +9,40 @@ REMOTE_HOST="88.208.225.250"        # Remote server address
 REMOTE_PATH="/speedtest/results/speedtest_results.csv"  # Full path to the CSV file on the remote server
 REMOTE_PASS='**@p3F_1$t'            # Remote server password (single quotes to handle special characters)
 
+# GitHub raw URL for the latest script version
+REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
+
+# Temporary file to store the latest version for comparison
+TEMP_SCRIPT="/tmp/latest_speedtest.sh"
+
+# Function to check for updates
+check_for_updates() {
+    echo -e "${CYAN}===================================================="
+    echo -e "           Checking for Script Updates..."
+    echo -e "====================================================${NC}"
+
+    # Fetch the latest version of the script from GitHub
+    curl -s -o "$TEMP_SCRIPT" "$REPO_RAW_URL"
+    LATEST_VERSION=$(grep "SCRIPT_VERSION=" "$TEMP_SCRIPT" | cut -d'"' -f2)
+
+    echo -e "DEBUG: Fetched Latest Version: $LATEST_VERSION"
+    echo -e "DEBUG: Current Version: $SCRIPT_VERSION"
+
+    if [ "$LATEST_VERSION" != "$SCRIPT_VERSION" ]; then
+        echo -e "${YELLOW}Update available: $LATEST_VERSION${NC}"
+        echo -e "Downloading the latest version..."
+
+        # Replace the current script with the new one
+        mv "$TEMP_SCRIPT" "$0"
+        chmod +x "$0"
+        echo -e "${GREEN}✔ Update downloaded to version $LATEST_VERSION. Please re-run the script.${NC}"
+        exit 0
+    else
+        echo -e "${GREEN}✔ You are using the latest version: $SCRIPT_VERSION${NC}"
+        rm "$TEMP_SCRIPT"
+    fi
+}
+
 # ANSI Color Codes
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -21,6 +55,9 @@ BOLD='\033[1m'
 # Symbols
 CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
+
+# Perform the update check
+check_for_updates
 
 # Display Title with a Frame
 echo -e "${CYAN}================================================"
