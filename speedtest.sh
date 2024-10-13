@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.2.12"
+SCRIPT_VERSION="2.2.13"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -33,6 +33,7 @@ CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
 
 # Function to log errors without stopping the script
+# Function to log errors without stopping the script
 log_error() {
     local error_message="$1"
     local timestamp_ms=$(($(date +%s%N)/1000000))  # Unix timestamp in milliseconds
@@ -42,20 +43,35 @@ log_error() {
     local private_ip="$(hostname -I | awk '{print $1}')"
     local public_ip="$(curl -s ifconfig.co)"
     local script_version="$SCRIPT_VERSION"
+    local temp_error_file="/tmp/error_log_temp.txt"
+
+    # Format the error log entry as a single line in CSV format
+    local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,\"$error_message\""
 
     # Ensure the directory for the error log exists
     if [ ! -d "$(dirname "$ERROR_LOG_PATH")" ]; then
         mkdir -p "$(dirname "$ERROR_LOG_PATH")"
     fi
 
-    # Format the error log entry as a single line in CSV format
-    local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,\"$error_message\""
+    # Prepend the new error entry at the start of the log file
+    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
+        echo '$error_entry' | cat - $ERROR_LOG_PATH > $temp_error_file && mv $temp_error_file $ERROR_LOG_PATH
+    "
 
-    # Write the error entry to the log file
-    echo -e "$error_entry" >> "$ERROR_LOG_PATH"
+    # Ensure the error log is under the size limit (2KB)
+    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
+        FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
+        if [ \$FILE_SIZE -gt $MAX_ERROR_LOG_SIZE ]; then
+            while [ \$FILE_SIZE -gt $MAX_ERROR_LOG_SIZE ]; do
+                sed -i '\$d' '$ERROR_LOG_PATH'  # Remove the oldest entry (last line) if the file exceeds 2KB
+                FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
+            done
+        fi
+    "
 
     echo -e "${CROSS} ${RED}Error: $error_message${NC}"
 }
+
 
 # Function to check for forced error file and apply its effects
 apply_forced_errors() {
