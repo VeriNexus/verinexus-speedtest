@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Speedtest script version
-RUN_SPEEDTEST_VERSION="1.0.5"
+RUN_SPEEDTEST_VERSION="1.0.6"
 
 run_speed_test() {
     echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
