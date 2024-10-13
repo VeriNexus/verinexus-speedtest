@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.2.6"
+SCRIPT_VERSION="2.2.7"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -275,15 +275,14 @@ SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
 SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
 printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 6: Extracting Shareable ID" "Shareable ID: $SHARE_ID"
 
-# Step 7: Saving Results (Remove the distance field)
+# Step 7: Saving Results (Remove the distance and jitter fields)
 HOSTNAME=$(hostname)
 CLIENT_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
 SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}')
 LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}')
-LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $5}')
-JITTER=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')
+LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $5}')   # Latency is now the 5th field
 
-RESULT_LINE="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$JITTER,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$SHARE_ID,$PRIVATE_IP,$PUBLIC_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
+RESULT_LINE="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$SHARE_ID,$PRIVATE_IP,$PUBLIC_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
 
 # Define the header for the CSV file
 HEADER_LINE="Client ID,Server Name,Location,Latency (ms),Jitter (ms),Download Speed (Mbps),Upload Speed (Mbps),Shareable ID,Private IP,Public IP,Hostname,Date (UK),Time (UK),MAC Address"
