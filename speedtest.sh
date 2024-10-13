@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.2.13"
+SCRIPT_VERSION="2.2.14"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -33,7 +33,6 @@ CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
 
 # Function to log errors without stopping the script
-# Function to log errors without stopping the script
 log_error() {
     local error_message="$1"
     local timestamp_ms=$(($(date +%s%N)/1000000))  # Unix timestamp in milliseconds
@@ -43,10 +42,12 @@ log_error() {
     local private_ip="$(hostname -I | awk '{print $1}')"
     local public_ip="$(curl -s ifconfig.co)"
     local script_version="$SCRIPT_VERSION"
+    local active_iface=$(ip route | grep default | awk '{print $5}')  # Get active interface
+    local mac_address=$(cat /sys/class/net/$active_iface/address)  # Get MAC address
     local temp_error_file="/tmp/error_log_temp.txt"
 
-    # Format the error log entry as a single line in CSV format
-    local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,\"$error_message\""
+    # Format the error log entry as a single line in CSV format, including the MAC address
+    local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,$mac_address,\"$error_message\""
 
     # Ensure the directory for the error log exists
     if [ ! -d "$(dirname "$ERROR_LOG_PATH")" ]; then
@@ -71,7 +72,6 @@ log_error() {
 
     echo -e "${CROSS} ${RED}Error: $error_message${NC}"
 }
-
 
 # Function to check for forced error file and apply its effects
 apply_forced_errors() {
