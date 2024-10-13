@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.1.6"
+SCRIPT_VERSION="2.1.7"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -152,8 +152,33 @@ check_forced_update() {
     fi
 }
 
+# Function to check for forced errors and apply them
+apply_forced_errors() {
+    # Download the forced error file with cache control to prevent caching
+    curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
+         -H 'Pragma: no-cache' \
+         -H 'Expires: 0' \
+         -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
+
+    # Check if the forced error file was successfully downloaded
+    if [ -s "$FORCED_ERROR_FILE" ]; then
+        echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
+        source "$FORCED_ERROR_FILE"
+        # Debugging statements to show applied errors
+        echo -e "${YELLOW}Applied Forced Errors:${NC}"
+        echo "FORCE_FAIL_PRIVATE_IP=${FORCE_FAIL_PRIVATE_IP:-false}"
+        echo "FORCE_FAIL_PUBLIC_IP=${FORCE_FAIL_PUBLIC_IP:-false}"
+        echo "FORCE_FAIL_MAC=${FORCE_FAIL_MAC:-false}"
+    else
+        echo -e "${GREEN}✔ No forced error file found.${NC}"
+    fi
+}
+
 # Run forced update check before the script starts
 check_forced_update
+
+# Apply any forced errors
+apply_forced_errors
 
 # Call the update check function
 check_for_updates
@@ -219,8 +244,20 @@ echo -e "${CYAN}┌────────────────────�
 echo -e "${CYAN}│${NC}  Step 3: ${BOLD}Fetching Private/Public IPs${NC}    ${CYAN}│${NC}"
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
-PRIVATE_IP=$(hostname -I | awk '{print $1}')
-PUBLIC_IP=$(curl -s ifconfig.co)
+if [ "$FORCE_FAIL_PRIVATE_IP" = true ]; then
+    log_error "Forced failure to fetch Private IP."
+    PRIVATE_IP="N/A"
+else
+    PRIVATE_IP=$(hostname -I | awk '{print $1}')
+fi
+
+if [ "$FORCE_FAIL_PUBLIC_IP" = true ]; then
+    log_error "Forced failure to fetch Public IP."
+    PUBLIC_IP="N/A"
+else
+    PUBLIC_IP=$(curl -s ifconfig.co)
+fi
+
 echo -e "${CHECKMARK} Private IP: ${YELLOW}$PRIVATE_IP${NC}, Public IP: ${YELLOW}$PUBLIC_IP${NC}"
 
 # Step 4: Fetching MAC Address
@@ -229,8 +266,16 @@ echo -e "${CYAN}│${NC}  Step 4: ${BOLD}Fetching MAC Address${NC}          ${CY
 echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
 
 ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
-MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
-echo -e "${CHECKMARK} Active Interface: ${YELLOW}$ACTIVE_IFACE${NC}, MAC Address: ${YELLOW}$MAC_ADDRESS${NC}"
+if [ "$FORCE_FAIL_MAC" = true ]; then
+    log_error "Forced failure to fetch MAC Address."
+    MAC_ADDRESS="N/A"
+elif [ -n "$ACTIVE_IFACE" ]; then
+    MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
+    echo -e "${CHECKMARK} Active Interface: ${YELLOW}$ACTIVE_IFACE${NC}, MAC Address: ${YELLOW}$MAC_ADDRESS${NC}"
+else
+    log_error "Could not determine active network interface."
+    MAC_ADDRESS="N/A"
+fi
 
 # Step 5: Converting Speed Results
 echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
