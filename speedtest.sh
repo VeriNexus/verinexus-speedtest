@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.1.5"
+SCRIPT_VERSION="2.1.6"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -45,9 +45,10 @@ log_error() {
     local private_ip="$(hostname -I | awk '{print $1}')"
     local public_ip="$(curl -s ifconfig.co)"
     local script_version="$SCRIPT_VERSION"
+    local mac_address="$(cat /sys/class/net/$(ip route | grep default | awk '{print $5}')/address)"
 
     # Format the error log entry as a single line in CSV format
-    local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,\"$error_message\""
+    local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,$mac_address,\"$error_message\""
     ERROR_LOG+="$error_entry\n"
 
     echo -e "${CROSS} ${RED}Error: $error_message${NC}"
@@ -138,8 +139,8 @@ check_forced_update() {
          -H 'Expires: 0' \
          -s -o "$FORCE_UPDATE_FILE" "$FORCE_UPDATE_URL"
 
-    # If the forced update file exists, force an update
-    if [ -s "$FORCE_UPDATE_FILE" ]; then
+    # If the forced update file exists and contains valid content, force an update
+    if grep -q "force" "$FORCE_UPDATE_FILE" 2>/dev/null; then
         echo -e "${YELLOW}Force update file found. Forcing update to the latest version...${NC}"
         check_for_updates
         # After the update, remove the force update file
