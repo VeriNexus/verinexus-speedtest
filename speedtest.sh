@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.2.4"
+SCRIPT_VERSION="2.2.5"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -284,6 +284,33 @@ LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $5}')
 JITTER=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')
 
 RESULT_LINE="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$JITTER,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$SHARE_ID,$PRIVATE_IP,$PUBLIC_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
+
+# Define the header for the CSV file
+HEADER_LINE="Client ID,Server Name,Location,Latency (ms),Jitter (ms),Download Speed (Mbps),Upload Speed (Mbps),Shareable ID,Private IP,Public IP,Hostname,Date (UK),Time (UK),MAC Address"
+
+# Check if the CSV file exists and is non-empty, if not, add the header
+sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
+    if [ ! -s '$REMOTE_PATH' ]; then
+        echo '$HEADER_LINE' >> '$REMOTE_PATH'
+    fi
+"
+
+# Run the SSH command with password authentication to save results
+echo -e "${BLUE}Running SSH command to save results...${NC}"
+ssh_attempts=0
+max_ssh_attempts=3
+while [ $ssh_attempts -lt $max_ssh_attempts ]; do
+    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" \
+    "echo '$RESULT_LINE' >> '$REMOTE_PATH'"
+    if [ $? -eq 0 ]; then
+        printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 7: Saving Results" "Results saved to the remote server."
+        break
+    else
+        log_error "Failed to save results to remote server. Retrying...($ssh_attempts)"
+        ssh_attempts=$((ssh_attempts + 1))
+        sleep 5
+    fi
+done
 
 # Run the SSH command with password authentication to save results
 echo -e "${BLUE}Running SSH command to save results...${NC}"
