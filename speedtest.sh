@@ -1,21 +1,19 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.1.3"
+SCRIPT_VERSION="2.1.4"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
-FORCE_UPDATE_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_update.txt"
 FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
 
-# Temporary files for comparison, force update, and forced error
+# Temporary files for comparison and forced error
 TEMP_SCRIPT="/tmp/latest_speedtest.sh"
-FORCE_UPDATE_FILE="/tmp/force_update.txt"
 FORCED_ERROR_FILE="/tmp/force_error.txt"
 ERROR_LOG=""
 MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
 
-# SSH connection details
+# SSH connection details (Password included as per your directive)
 REMOTE_USER="root"
 REMOTE_HOST="88.208.225.250"
 REMOTE_PATH="/speedtest/results/speedtest_results.csv"
@@ -44,44 +42,14 @@ log_error() {
     local hostname="$(hostname)"
     local private_ip="$(hostname -I | awk '{print $1}')"
     local public_ip="$(curl -s ifconfig.co)"
-    local mac_address=$(cat /sys/class/net/$(ip route | grep default | awk '{print $5}')/address)
     local script_version="$SCRIPT_VERSION"
+    local mac_address="$MAC_ADDRESS"
 
     # Format the error log entry as a single line in CSV format
     local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,$mac_address,\"$error_message\""
     ERROR_LOG+="$error_entry\n"
 
     echo -e "${CROSS} ${RED}Error: $error_message${NC}"
-}
-
-# Function to check for a force update file and apply updates if needed
-check_for_force_update() {
-    # Remove any legacy force update file
-    if [ -f "$FORCE_UPDATE_FILE" ]; then
-        rm -f "$FORCE_UPDATE_FILE"
-        echo -e "${YELLOW}Removed legacy force update file.${NC}"
-    fi
-
-    # Download the force update file (with cache control headers)
-    curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
-         -H 'Pragma: no-cache' \
-         -H 'Expires: 0' \
-         -s -o "$FORCE_UPDATE_FILE" "$FORCE_UPDATE_URL"
-
-    # Check if the file was downloaded and is not empty
-    if [ -s "$FORCE_UPDATE_FILE" ]; then
-        # Check if the file contains "404: Not Found"
-        if grep -q "404: Not Found" "$FORCE_UPDATE_FILE"; then
-            echo -e "${YELLOW}No force update file found on GitHub.${NC}"
-            rm -f "$FORCE_UPDATE_FILE"  # Remove the erroneous file
-        else
-            echo -e "${RED}Force update file found. Forcing update to the latest version...${NC}"
-            # Proceed to force the update by downloading the latest version
-            check_for_updates
-        fi
-    else
-        echo -e "${GREEN}No force update detected.${NC}"
-    fi
 }
 
 # Function to apply forced errors
@@ -95,12 +63,20 @@ apply_forced_errors() {
     # Check if the forced error file was successfully downloaded
     if [ -s "$FORCED_ERROR_FILE" ]; then
         echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
-        source "$FORCED_ERROR_FILE"
+
+        # Parse the forced error file and ensure only uncommented lines are executed
+        while IFS= read -r line || [ -n "$line" ]; do
+            # Ignore commented lines (lines starting with #) or blank lines
+            if [[ ! "$line" =~ ^# ]] && [[ -n "$line" ]]; then
+                eval "$line"
+            fi
+        done < "$FORCED_ERROR_FILE"
+
         # Debugging statements
         echo -e "${YELLOW}Applied Forced Errors:${NC}"
-        echo "FORCE_FAIL_PRIVATE_IP=$FORCE_FAIL_PRIVATE_IP"
-        echo "FORCE_FAIL_PUBLIC_IP=$FORCE_FAIL_PUBLIC_IP"
-        echo "FORCE_FAIL_MAC=$FORCE_FAIL_MAC"
+        echo "FORCE_FAIL_PRIVATE_IP=${FORCE_FAIL_PRIVATE_IP:-false}"
+        echo "FORCE_FAIL_PUBLIC_IP=${FORCE_FAIL_PUBLIC_IP:-false}"
+        echo "FORCE_FAIL_MAC=${FORCE_FAIL_MAC:-false}"
     else
         # If the forced error file was previously downloaded but no longer exists in the repo, remove it
         if [ -f "$FORCED_ERROR_FILE" ]; then
@@ -198,8 +174,22 @@ run_speed_test() {
     return 1  # Fail if all attempts failed
 }
 
-# Check for a forced update
-check_for_force_update
+# Remove any legacy force update file
+if [ -f "/tmp/force_update.txt" ]; then
+    rm /tmp/force_update.txt
+    echo "Removed legacy force update file."
+fi
+
+# Download force update file if available
+curl -s "$REPO_RAW_URL/force_update.txt" -o /tmp/force_update.txt
+
+if [ -s "/tmp/force_update.txt" ]; then
+    echo "Force update file found. Forcing update to the latest version..."
+    check_for_updates
+    exit 0
+else
+    echo "No force update file found on GitHub."
+fi
 
 # Apply any forced errors
 apply_forced_errors
