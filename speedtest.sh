@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.1.8"
+SCRIPT_VERSION="2.1.9"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -13,7 +13,7 @@ FORCED_ERROR_FILE="/tmp/force_error.txt"
 ERROR_LOG=""
 MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
 
-# SSH connection details
+# SSH connection details (Password included as per your directive)
 REMOTE_USER="root"
 REMOTE_HOST="88.208.225.250"
 REMOTE_PATH="/speedtest/results/speedtest_results.csv"
@@ -27,6 +27,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[1;34m'
 CYAN='\033[1;36m'
 NC='\033[0m' # No Color
+BOLD='\033[1m'
 
 # Symbols
 CHECKMARK="${GREEN}✔${NC}"
@@ -73,7 +74,7 @@ apply_forced_errors() {
             echo -e "${YELLOW}Forced error file removed from GitHub. Deleting local copy...${NC}"
             rm -f "$FORCED_ERROR_FILE"
         fi
-    fi
+    fi  # Corrected 'fi' statement
 }
 
 # Function to compare versions using awk
@@ -152,7 +153,11 @@ run_speed_test() {
     while [ $attempts -lt $max_attempts ]; do
         echo -e "${BLUE}Attempting speed test (Attempt $((attempts+1)) of $max_attempts)...${NC}"
         SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
-        if [ $? -eq 0 ]; then
+        
+        # Debug: print the full SPEEDTEST_OUTPUT to see if it's captured correctly
+        echo "Speed Test Output: $SPEEDTEST_OUTPUT"
+        
+        if [ $? -eq 0 ] && [ -n "$SPEEDTEST_OUTPUT" ]; then
             echo -e "${CHECKMARK} Speed Test completed successfully."
             return 0
         else
@@ -191,14 +196,28 @@ echo -e "${BLUE}${BOLD}Starting VeriNexus Speed Test...${NC}"
 progress_bar
 
 # Step 1: Running Speed Test with retry logic
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 1: Running Speed Test" "Speed Test completed successfully."
+echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}│${NC}  Step 1: ${BOLD}Running Speed Test${NC}           ${CYAN}│${NC}"
+echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+
+if ! run_speed_test; then
+    log_error "Speed Test failed after multiple attempts."
+fi
 
 # Step 2: Fetching Date and Time (UK Time - GMT/BST)
+echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}│${NC}  Step 2: ${BOLD}Fetching Date and Time (UK Time)${NC} ${CYAN}│${NC}"
+echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+
 UK_DATE=$(TZ="Europe/London" date +"%Y-%m-%d")
 UK_TIME=$(TZ="Europe/London" date +"%H:%M:%S")
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 2: Fetching Date and Time (UK Time)" "Date (UK): $UK_DATE, Time (UK): $UK_TIME"
+echo -e "${CHECKMARK} Date (UK): ${YELLOW}$UK_DATE${NC}, Time (UK): ${YELLOW}$UK_TIME${NC}"
 
 # Step 3: Fetching Private/Public IPs
+echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}│${NC}  Step 3: ${BOLD}Fetching Private/Public IPs${NC}    ${CYAN}│${NC}"
+echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+
 if [ "$FORCE_FAIL_PRIVATE_IP" = true ]; then
     log_error "Forced failure to fetch Private IP."
     PRIVATE_IP="N/A"
@@ -212,31 +231,49 @@ if [ "$FORCE_FAIL_PUBLIC_IP" = true ]; then
 else
     PUBLIC_IP=$(curl -s ifconfig.co)
 fi
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 3: Fetching Private/Public IPs" "Private IP: $PRIVATE_IP, Public IP: $PUBLIC_IP"
+
+echo -e "${CHECKMARK} Private IP: ${YELLOW}$PRIVATE_IP${NC}, Public IP: ${YELLOW}$PUBLIC_IP${NC}"
 
 # Step 4: Fetching MAC Address
+echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}│${NC}  Step 4: ${BOLD}Fetching MAC Address${NC}          ${CYAN}│${NC}"
+echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+
 ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
 if [ "$FORCE_FAIL_MAC" = true ]; then
     log_error "Forced failure to fetch MAC Address."
     MAC_ADDRESS="N/A"
 elif [ -n "$ACTIVE_IFACE" ]; then
     MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
-    printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 4: Fetching MAC Address" "MAC Address: $MAC_ADDRESS"
+    echo -e "${CHECKMARK} Active Interface: ${YELLOW}$ACTIVE_IFACE${NC}, MAC Address: ${YELLOW}$MAC_ADDRESS${NC}"
 else
     log_error "Could not determine active network interface."
+    MAC_ADDRESS="N/A"
 fi
 
 # Step 5: Converting Speed Results
+echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}│${NC}  Step 5: ${BOLD}Converting Speed Results${NC}      ${CYAN}│${NC}"
+echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+
 DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $7 / 1000000}')
 UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $8 / 1000000}')
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 5: Converting Speed Results" "Download Speed: $DOWNLOAD_SPEED Mbps, Upload Speed: $UPLOAD_SPEED Mbps"
+echo -e "${CHECKMARK} Download Speed: ${GREEN}$DOWNLOAD_SPEED Mbps${NC}, Upload Speed: ${GREEN}$UPLOAD_SPEED Mbps${NC}"
 
 # Step 6: Extracting Shareable ID
+echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}│${NC}  Step 6: ${BOLD}Extracting Shareable ID${NC}       ${CYAN}│${NC}"
+echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+
 SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
 SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 6: Extracting Shareable ID" "Shareable ID: $SHARE_ID"
+echo -e "${CHECKMARK} Shareable ID: ${YELLOW}$SHARE_ID${NC}"
 
 # Step 7: Saving Results
+echo -e "${CYAN}┌──────────────────────────────────────────┐${NC}"
+echo -e "${CYAN}│${NC}  Step 7: ${BOLD}Saving Results${NC}                ${CYAN}│${NC}"
+echo -e "${CYAN}└──────────────────────────────────────────┘${NC}"
+
 HOSTNAME=$(hostname)
 CLIENT_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
 SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}')
@@ -252,7 +289,7 @@ sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_
 "echo '$RESULT_LINE' >> '$REMOTE_PATH'"
 
 if [ $? -eq 0 ]; then
-    printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 7: Saving Results" "Results saved to the remote server."
+    echo -e "${CHECKMARK} Results saved to the remote server."
 else
     log_error "Failed to save results to the remote server."
 fi
@@ -267,6 +304,7 @@ if [ -n "$ERROR_LOG" ]; then
     # Upload the error log and implement size limitation on the remote server
     sshpass -p "$REMOTE_PASS" scp -o StrictHostKeyChecking=no "$TEMP_ERROR_LOG" "$REMOTE_USER@$REMOTE_HOST:/tmp/error_temp.txt"
     sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
+        # Prepend the new error log entry to the existing error log
         if [ -f '$ERROR_LOG_PATH' ]; then
             mv '$ERROR_LOG_PATH' '/tmp/old_error_log.txt'
             cat /tmp/error_temp.txt /tmp/old_error_log.txt > '$ERROR_LOG_PATH'
@@ -274,11 +312,15 @@ if [ -n "$ERROR_LOG" ]; then
         else
             mv /tmp/error_temp.txt '$ERROR_LOG_PATH'
         fi
+        # Remove the temporary error log file
         rm /tmp/error_temp.txt
+        # Check the size of the error log file
         FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
         MAX_SIZE=$MAX_ERROR_LOG_SIZE
         if [ \$FILE_SIZE -gt \$MAX_SIZE ]; then
+            # Truncate the oldest entries from the end to reduce the file size
             while [ \$FILE_SIZE -gt \$MAX_SIZE ]; do
+                # Remove the last line (oldest entry)
                 sed -i '\$d' '$ERROR_LOG_PATH'
                 FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
             done
@@ -290,6 +332,8 @@ if [ -n "$ERROR_LOG" ]; then
     else
         echo -e "${CROSS} ${RED}Failed to upload error log to the remote server.${NC}"
     fi
+
+    # Remove the temporary error log file
     rm -f "$TEMP_ERROR_LOG"
 fi
 
