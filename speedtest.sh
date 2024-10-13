@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.0.13"
+SCRIPT_VERSION="2.0.15"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -13,12 +13,12 @@ FORCED_ERROR_FILE="/tmp/force_error.txt"
 ERROR_LOG=""
 MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
 
-# SSH connection details (Password included as per your request)
+# SSH connection details (Password included as per your directive)
 REMOTE_USER="root"
 REMOTE_HOST="88.208.225.250"
 REMOTE_PATH="/speedtest/results/speedtest_results.csv"
 ERROR_LOG_PATH="/speedtest/results/error.txt"
-REMOTE_PASS='[YOUR_PASSWORD]'  # Replace [YOUR_PASSWORD] with your actual password
+REMOTE_PASS='**@p3F_1$t'  # Password included as per your request
 
 # ANSI Color Codes
 RED='\033[0;31m'
@@ -74,7 +74,7 @@ apply_forced_errors() {
             echo -e "${YELLOW}Forced error file removed from GitHub. Deleting local copy...${NC}"
             rm -f "$FORCED_ERROR_FILE"
         fi
-    }
+    fi  # Corrected 'fi' statement
 }
 
 # Function to compare versions using awk
