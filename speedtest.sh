@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Main script version
-SCRIPT_VERSION="1.1.4"
+SCRIPT_VERSION="1.1.5"
 
 # Define remote server credentials and file path
 REMOTE_USER='root'
@@ -24,12 +24,19 @@ download_file_if_needed() {
         # Add a timestamp to the URL to avoid caching
         local timestamp=$(date +%s)
 
-        curl -s -H 'Cache-Control: no-cache, no-store, must-revalidate' \
+        # Correct curl command syntax
+        curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
              -H 'Pragma: no-cache' \
              -H 'Expires: 0' \
              -o "./$file_name" \
              "https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/$file_name?t=$timestamp"
-        chmod +x "./$file_name"
+
+        if [[ $? -eq 0 ]]; then
+            echo "$file_name downloaded successfully."
+            chmod +x "./$file_name"
+        else
+            echo "Failed to download $file_name. Please check the URL or network connection."
+        fi
     else
         echo "$file_name is already up to date."
     fi
