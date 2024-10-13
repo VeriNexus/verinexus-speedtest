@@ -1,26 +1,27 @@
 #!/bin/bash
 
 # Main script version
-SCRIPT_VERSION="1.0.5"
+SCRIPT_VERSION="1.0.6"
 
-# Load other scripts (download them if necessary)
+# Function to download files if needed
 download_file_if_needed() {
     local file_name=$1
     local latest_version_var=$2
 
     if [[ ! -f "./$file_name" ]] || [[ $(grep "$latest_version_var" "./$file_name" | cut -d'=' -f2 | tr -d '"') != "${!latest_version_var}" ]]; then
         echo "Updating $file_name to the latest version..."
-        curl -s -o "./$file_name" "https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/$file_name"
+        curl -s "https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/$file_name" -o "./$file_name"
         chmod +x "./$file_name"
     fi
 }
 
-# Download and load the scripts
-LATEST_ERROR_HANDLER_VERSION="1.0.5"
-LATEST_UPDATE_CHECK_VERSION="1.0.5"
-LATEST_RUN_SPEEDTEST_VERSION="1.0.5"
-LATEST_UTILS_VERSION="1.0.5"
+# Define latest versions for components
+LATEST_ERROR_HANDLER_VERSION="1.0.6"
+LATEST_UPDATE_CHECK_VERSION="1.0.6"
+LATEST_RUN_SPEEDTEST_VERSION="1.0.6"
+LATEST_UTILS_VERSION="1.0.6"
 
+# Download and load the latest scripts
 download_file_if_needed "error_handler.sh" LATEST_ERROR_HANDLER_VERSION
 download_file_if_needed "update_check.sh" LATEST_UPDATE_CHECK_VERSION
 download_file_if_needed "run_speedtest.sh" LATEST_RUN_SPEEDTEST_VERSION
@@ -38,7 +39,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[1;36m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
 BOLD='\033[1m'
