@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.1.8"
+SCRIPT_VERSION="2.1.9"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
-FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
+FORCED_ERROR_URL="https://raw.githubusercontent.com/Verinexus/verinexus-speedtest/main/force_error.txt"
 
 # Temporary files for comparison and forced error
 TEMP_SCRIPT="/tmp/latest_speedtest.sh"
@@ -45,7 +45,7 @@ log_error() {
 
     # Format the error log entry as a single line in CSV format
     local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,\"$error_message\""
-    ERROR_LOG+="$error_entry\n"
+    echo -e "$error_entry" >> "$ERROR_LOG_PATH"
 
     echo -e "${CROSS} ${RED}Error: $error_message${NC}"
 }
@@ -61,12 +61,19 @@ apply_forced_errors() {
     # Check if the forced error file was successfully downloaded
     if [ -s "$FORCED_ERROR_FILE" ]; then
         echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
-        source "$FORCED_ERROR_FILE"
-        # Debugging statements
-        echo -e "${YELLOW}Applied Forced Errors:${NC}"
-        echo "FORCE_FAIL_PRIVATE_IP=$FORCE_FAIL_PRIVATE_IP"
-        echo "FORCE_FAIL_PUBLIC_IP=$FORCE_FAIL_PUBLIC_IP"
-        echo "FORCE_FAIL_MAC=$FORCE_FAIL_MAC"
+
+        # Validate the file before sourcing it
+        if bash -n "$FORCED_ERROR_FILE"; then
+            source "$FORCED_ERROR_FILE"
+            # Debugging statements
+            echo -e "${YELLOW}Applied Forced Errors:${NC}"
+            echo "FORCE_FAIL_PRIVATE_IP=$FORCE_FAIL_PRIVATE_IP"
+            echo "FORCE_FAIL_PUBLIC_IP=$FORCE_FAIL_PUBLIC_IP"
+            echo "FORCE_FAIL_MAC=$FORCE_FAIL_MAC"
+        else
+            log_error "Forced error file contains invalid syntax. Deleting local copy."
+            rm -f "$FORCED_ERROR_FILE"
+        fi
     else
         # If the forced error file was previously downloaded but no longer exists in the repo, remove it
         if [ -f "$FORCED_ERROR_FILE" ]; then
@@ -95,7 +102,7 @@ version_gt() {
     }'
 }
 
-# Function to check for updates with cache control and version check
+# Function to check for updates with retry logic
 check_for_updates() {
     echo -e "${CYAN}====================================================${NC}"
     echo -e "           ${BOLD}Checking for Script Updates...${NC}"
@@ -104,16 +111,22 @@ check_for_updates() {
     # Clear any previous version of the file
     rm -f "$TEMP_SCRIPT"
 
-    # Download the latest version of the script with cache control headers
-    curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
-         -H 'Pragma: no-cache' \
-         -H 'Expires: 0' \
-         -s -o "$TEMP_SCRIPT" "$REPO_RAW_URL"
-
-    if [ $? -ne 0 ]; then
-        log_error "Failed to download the script from GitHub."
-        return 1
-    fi
+    local max_attempts=3
+    local attempt=0
+    while [ $attempt -lt $max_attempts ]; do
+        # Download the latest version of the script with cache control headers
+        curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
+             -H 'Pragma: no-cache' \
+             -H 'Expires: 0' \
+             -s -o "$TEMP_SCRIPT" "$REPO_RAW_URL"
+        if [ $? -eq 0 ]; then
+            break
+        else
+            log_error "Failed to download the script from GitHub. Retrying...($attempt)"
+        fi
+        attempt=$((attempt + 1))
+        sleep 5
+    done
 
     # Ensure the downloaded file is valid
     if [ ! -s "$TEMP_SCRIPT" ]; then
@@ -229,6 +242,11 @@ fi
 # Step 5: Converting Speed Results
 DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $7 / 1000000}')
 UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $8 / 1000000}')
+if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" ]]; then
+    log_error "Speed Test did not return valid download/upload speeds."
+    DOWNLOAD_SPEED="0.00"
+    UPLOAD_SPEED="0.00"
+fi
 printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 5: Converting Speed Results" "Download Speed: $DOWNLOAD_SPEED Mbps, Upload Speed: $UPLOAD_SPEED Mbps"
 
 # Step 6: Extracting Shareable ID
@@ -248,14 +266,20 @@ RESULT_LINE="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$JITTER,$DOWNLOAD_SPEED,
 
 # Run the SSH command with password authentication to save results
 echo -e "${BLUE}Running SSH command to save results...${NC}"
-sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" \
-"echo '$RESULT_LINE' >> '$REMOTE_PATH'"
-
-if [ $? -eq 0 ]; then
-    printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 7: Saving Results" "Results saved to the remote server."
-else
-    log_error "Failed to save results to the remote server."
-fi
+local ssh_attempts=0
+local max_ssh_attempts=3
+while [ $ssh_attempts -lt $max_ssh_attempts ]; do
+    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" \
+    "echo '$RESULT_LINE' >> '$REMOTE_PATH'"
+    if [ $? -eq 0 ]; then
+        printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 7: Saving Results" "Results saved to the remote server."
+        break
+    else
+        log_error "Failed to save results to remote server. Retrying...($ssh_attempts)"
+        ssh_attempts=$((ssh_attempts + 1))
+        sleep 5
+    fi
+done
 
 # If any errors occurred, upload the error log
 if [ -n "$ERROR_LOG" ]; then
@@ -279,7 +303,7 @@ if [ -n "$ERROR_LOG" ]; then
         MAX_SIZE=$MAX_ERROR_LOG_SIZE
         if [ \$FILE_SIZE -gt \$MAX_SIZE ]; then
             while [ \$FILE_SIZE -gt \$MAX_SIZE ]; do
-                sed -i '\$d' '$ERROR_LOG_PATH'
+                sed -i '1d' '$ERROR_LOG_PATH'  # Delete older entries to maintain latest logs
                 FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
             done
         fi
