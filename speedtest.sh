@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.0.12"
+SCRIPT_VERSION="2.0.13"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -18,7 +18,7 @@ REMOTE_USER="root"
 REMOTE_HOST="88.208.225.250"
 REMOTE_PATH="/speedtest/results/speedtest_results.csv"
 ERROR_LOG_PATH="/speedtest/results/error.txt"
-REMOTE_PASS='**@p3F_1$t'  # Replace this with your actual password if different
+REMOTE_PASS='[YOUR_PASSWORD]'  # Replace [YOUR_PASSWORD] with your actual password
 
 # ANSI Color Codes
 RED='\033[0;31m'
@@ -36,14 +36,18 @@ CROSS="${RED}✖${NC}"
 # Function to log errors without stopping the script
 log_error() {
     local error_message="$1"
-    ERROR_LOG+="===============================\n"
-    ERROR_LOG+="Timestamp: $(TZ='Europe/London' date +"%Y-%m-%d %H:%M:%S")\n"
-    ERROR_LOG+="Script Version: $SCRIPT_VERSION\n"
-    ERROR_LOG+="Hostname: $(hostname)\n"
-    ERROR_LOG+="Private IP: $(hostname -I | awk '{print $1}')\n"
-    ERROR_LOG+="Public IP: $(curl -s ifconfig.co)\n"
-    ERROR_LOG+="Error: $error_message\n"
-    ERROR_LOG+="===============================\n"
+    local timestamp_ms=$(($(date +%s%N)/1000000))  # Unix timestamp in milliseconds
+    local timestamp="$(TZ='Europe/London' date +"%Y-%m-%d %H:%M:%S")"
+    local error_id="$timestamp_ms"
+    local hostname="$(hostname)"
+    local private_ip="$(hostname -I | awk '{print $1}')"
+    local public_ip="$(curl -s ifconfig.co)"
+    local script_version="$SCRIPT_VERSION"
+
+    # Format the error log entry as a single line in CSV format
+    local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,\"$error_message\""
+    ERROR_LOG+="$error_entry\n"
+
     echo -e "${CROSS} ${RED}Error: $error_message${NC}"
 }
 
@@ -70,7 +74,7 @@ apply_forced_errors() {
             echo -e "${YELLOW}Forced error file removed from GitHub. Deleting local copy...${NC}"
             rm -f "$FORCED_ERROR_FILE"
         fi
-    fi
+    }
 }
 
 # Function to compare versions using awk
@@ -275,9 +279,9 @@ JITTER=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')
 
 RESULT_LINE="$CLIENT_ID,$SERVER_NAME,$LOCATION,$LATENCY,$JITTER,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$SHARE_ID,$PRIVATE_IP,$PUBLIC_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
 
-# Run the SSH command with password authentication
+# Run the SSH command with password authentication to save results
 echo -e "${BLUE}Running SSH command to save results...${NC}"
-echo "$RESULT_LINE" | sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" \
+sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" \
 "echo '$RESULT_LINE' >> '$REMOTE_PATH'"
 
 if [ $? -eq 0 ]; then
@@ -296,17 +300,26 @@ if [ -n "$ERROR_LOG" ]; then
     # Upload the error log and implement size limitation on the remote server
     sshpass -p "$REMOTE_PASS" scp -o StrictHostKeyChecking=no "$TEMP_ERROR_LOG" "$REMOTE_USER@$REMOTE_HOST:/tmp/error_temp.txt"
     sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
-        # Append the new error log to the existing error log
-        cat /tmp/error_temp.txt >> '$ERROR_LOG_PATH'
+        # Prepend the new error log entry to the existing error log
+        if [ -f '$ERROR_LOG_PATH' ]; then
+            mv '$ERROR_LOG_PATH' '/tmp/old_error_log.txt'
+            cat /tmp/error_temp.txt /tmp/old_error_log.txt > '$ERROR_LOG_PATH'
+            rm /tmp/old_error_log.txt
+        else
+            mv /tmp/error_temp.txt '$ERROR_LOG_PATH'
+        fi
+        # Remove the temporary error log file
         rm /tmp/error_temp.txt
         # Check the size of the error log file
         FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
         MAX_SIZE=$MAX_ERROR_LOG_SIZE
         if [ \$FILE_SIZE -gt \$MAX_SIZE ]; then
-            # Truncate the oldest entries to reduce the file size below the limit
-            TEMP_FILE='/tmp/error_log_temp.txt'
-            tail -c \$MAX_SIZE '$ERROR_LOG_PATH' > \$TEMP_FILE
-            mv \$TEMP_FILE '$ERROR_LOG_PATH'
+            # Truncate the oldest entries from the end to reduce the file size
+            while [ \$FILE_SIZE -gt \$MAX_SIZE ]; do
+                # Remove the last line (oldest entry)
+                sed -i '\$d' '$ERROR_LOG_PATH'
+                FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
+            done
         fi
     "
 
