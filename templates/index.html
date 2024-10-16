@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Speed Test</title>
+</head>
+<body>
+    <form method="POST">
+        <label for="mac_address">MAC Address:</label>
+        <select name="mac_address" id="mac_address">
+            {% for mac in mac_addresses %}
+            <option value="{{ mac }}">{{ mac }}</option>
+            {% endfor %}
+        </select>
+
+        <label for="start_date">Start Date:</label>
+        <input type="date" name="start_date" id="start_date">
+
+        <label for="end_date">End Date:</label>
+        <input type="date" name="end_date" id="end_date">
+
+        <button type="submit">Submit</button>
+    </form>
+
+    {% if plot_url %}
+    <h3>Network Speed Over Time</h3>
+    <img src="data:image/png;base64,{{ plot_url }}" alt="Network Speed Plot">
+    {% else %}
+    <p>No data available for the selected criteria.</p>
+    {% endif %}
+</body>
+</html>
