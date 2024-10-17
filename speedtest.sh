@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.2.14"
+SCRIPT_VERSION="2.3.6"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -13,12 +13,10 @@ FORCED_ERROR_FILE="/tmp/force_error.txt"
 ERROR_LOG=""
 MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
 
-# SSH connection details
-REMOTE_USER="root"
-REMOTE_HOST="88.208.225.250"
-REMOTE_PATH="/speedtest/results/speedtest_results.csv"
-ERROR_LOG_PATH="/speedtest/results/error.txt"
-REMOTE_PASS='**@p3F_1$t'  # Password included as per your request
+# InfluxDB configuration
+INFLUXDB_URL="http://82.165.7.116:8086"
+INFLUXDB_DB="speedtest_db"
+INFLUXDB_MEASUREMENT="speedtest"
 
 # ANSI Color Codes
 RED='\033[0;31m'
@@ -35,75 +33,59 @@ CROSS="${RED}✖${NC}"
 # Function to log errors without stopping the script
 log_error() {
     local error_message="$1"
-    local timestamp_ms=$(($(date +%s%N)/1000000))  # Unix timestamp in milliseconds
-    local timestamp="$(TZ='Europe/London' date +"%Y-%m-%d %H:%M:%S")"
-    local error_id="$timestamp_ms"
-    local hostname="$(hostname)"
-    local private_ip="$(hostname -I | awk '{print $1}')"
-    local public_ip="$(curl -s ifconfig.co)"
-    local script_version="$SCRIPT_VERSION"
-    local active_iface=$(ip route | grep default | awk '{print $5}')  # Get active interface
-    local mac_address=$(cat /sys/class/net/$active_iface/address)  # Get MAC address
-    local temp_error_file="/tmp/error_log_temp.txt"
-
-    # Format the error log entry as a single line in CSV format, including the MAC address
-    local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,$mac_address,\"$error_message\""
-
-    # Ensure the directory for the error log exists
-    if [ ! -d "$(dirname "$ERROR_LOG_PATH")" ]; then
-        mkdir -p "$(dirname "$ERROR_LOG_PATH")"
-    fi
-
-    # Prepend the new error entry at the start of the log file
-    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
-        echo '$error_entry' | cat - $ERROR_LOG_PATH > $temp_error_file && mv $temp_error_file $ERROR_LOG_PATH
-    "
-
-    # Ensure the error log is under the size limit (2KB)
-    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
-        FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
-        if [ \$FILE_SIZE -gt $MAX_ERROR_LOG_SIZE ]; then
-            while [ \$FILE_SIZE -gt $MAX_ERROR_LOG_SIZE ]; do
-                sed -i '\$d' '$ERROR_LOG_PATH'  # Remove the oldest entry (last line) if the file exceeds 2KB
-                FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
-            done
-        fi
-    "
-
     echo -e "${CROSS} ${RED}Error: $error_message${NC}"
+}
+
+# Function to check for dependencies
+check_dependencies() {
+    local dependencies=("curl" "speedtest-cli" "awk" "ip" "jq")
+    local missing=()
+
+    echo -e "${CYAN}Checking for necessary dependencies...${NC}"
+    
+    for dep in "${dependencies[@]}"; do
+        if ! command -v "$dep" &> /dev/null; then
+            missing+=("$dep")
+        fi
+    done
+
+    if [ ${#missing[@]} -ne 0 ]; then
+        echo -e "${RED}The following dependencies are missing:${NC} ${missing[*]}"
+        echo -e "${YELLOW}Attempting to install missing dependencies...${NC}"
+        sudo apt-get update && sudo apt-get install -y "${missing[@]}"
+        
+        # Check again to confirm installation was successful
+        for dep in "${missing[@]}"]; do
+            if ! command -v "$dep" &> /dev/null; then
+                echo -e "${RED}Failed to install $dep. Exiting.${NC}"
+                exit 1
+            fi
+        done
+        echo -e "${CHECKMARK} All dependencies are installed.${NC}"
+    else
+        echo -e "${CHECKMARK} All dependencies are already installed.${NC}"
+    fi
 }
 
 # Function to check for forced error file and apply its effects
 apply_forced_errors() {
-    # Download the forced error file with cache control to prevent caching
     curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
          -H 'Pragma: no-cache' \
          -H 'Expires: 0' \
          -s -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
 
-    # Check if the forced error file was successfully downloaded
     if [ -s "$FORCED_ERROR_FILE" ]; then
         echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
-
-        # Display the contents of the downloaded force_error.txt file for debugging
         echo -e "Contents of force_error.txt file being applied:"
         cat "$FORCED_ERROR_FILE"
-
-        # Validate the file before sourcing it
+        
         if bash -n "$FORCED_ERROR_FILE"; then
-            # Force sourcing to ensure proper application
             . "$FORCED_ERROR_FILE"
-            # Debugging statements
-            echo -e "${YELLOW}Applied Forced Errors:${NC}"
-            echo "FORCE_FAIL_PRIVATE_IP=${FORCE_FAIL_PRIVATE_IP:-false}"
-            echo "FORCE_FAIL_PUBLIC_IP=${FORCE_FAIL_PUBLIC_IP:-false}"
-            echo "FORCE_FAIL_MAC=${FORCE_FAIL_MAC:-false}"
         else
             log_error "Forced error file contains invalid syntax. Deleting local copy."
             rm -f "$FORCED_ERROR_FILE"
         fi
     else
-        # If the forced error file was previously downloaded but no longer exists in the repo, remove it
         if [ -f "$FORCED_ERROR_FILE" ]; then
             echo -e "${YELLOW}Forced error file removed from GitHub. Deleting local copy...${NC}"
             rm -f "$FORCED_ERROR_FILE"
@@ -111,38 +93,17 @@ apply_forced_errors() {
     fi
 }
 
-# Function to compare versions using awk
-version_gt() {
-    awk -v v1="$1" -v v2="$2" '
-    BEGIN {
-        split(v1, a, ".")
-        split(v2, b, ".")
-        for (i = 1; i <= length(a) || i <= length(b); i++) {
-            a_i = (i in a) ? a[i] : 0
-            b_i = (i in b) ? b[i] : 0
-            if (a_i > b_i) {
-                exit 0  # v1 > v2
-            } else if (a_i < b_i) {
-                exit 1  # v1 < v2
-            }
-        }
-        exit 1  # v1 == v2
-    }'
-}
-
-# Function to check for updates with retry logic
+# Function to check for updates
 check_for_updates() {
     echo -e "${CYAN}====================================================${NC}"
     echo -e "           ${BOLD}Checking for Script Updates...${NC}"
     echo -e "${CYAN}====================================================${NC}"
 
-    # Clear any previous version of the file
     rm -f "$TEMP_SCRIPT"
 
     local max_attempts=3
     local attempt=0
     while [ $attempt -lt $max_attempts ]; do
-        # Download the latest version of the script with cache control headers
         curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
              -H 'Pragma: no-cache' \
              -H 'Expires: 0' \
@@ -156,13 +117,11 @@ check_for_updates() {
         sleep 5
     done
 
-    # Ensure the downloaded file is valid
     if [ ! -s "$TEMP_SCRIPT" ]; then
         log_error "Downloaded script is empty."
         return 1
     fi
 
-    # Extract version from the downloaded script
     LATEST_VERSION=$(grep -oP 'SCRIPT_VERSION="\K[0-9.]+' "$TEMP_SCRIPT")
     if [ -z "$LATEST_VERSION" ]; then
         log_error "Failed to extract version from the downloaded script."
@@ -172,7 +131,6 @@ check_for_updates() {
     echo -e "${CHECKMARK} Current version: ${YELLOW}$SCRIPT_VERSION${NC}"
     echo -e "${CHECKMARK} Latest version: ${YELLOW}$LATEST_VERSION${NC}"
 
-    # Compare versions to check if we should upgrade
     if version_gt "$LATEST_VERSION" "$SCRIPT_VERSION"; then
         echo -e "${YELLOW}New version available: $LATEST_VERSION${NC}"
         cp "$TEMP_SCRIPT" "$0"
@@ -186,7 +144,7 @@ check_for_updates() {
     echo -e "${CYAN}====================================================${NC}"
 }
 
-# Retry function to retry the speed test in case of failure
+# Function to run the speed test
 run_speed_test() {
     local attempts=0
     local max_attempts=3
@@ -199,12 +157,12 @@ run_speed_test() {
         else
             log_error "Speed Test failed on attempt $((attempts+1))."
             attempts=$((attempts+1))
-            sleep 5  # Wait before retrying
+            sleep 5
         fi
     done
 
     if [ $attempts -eq $max_attempts ]; then
-        return 1  # Fail if all attempts failed
+        return 1
     fi
     return 0
 }
@@ -212,30 +170,13 @@ run_speed_test() {
 # Apply any forced errors
 apply_forced_errors
 
+# Check for dependencies
+check_dependencies
+
 # Call the update check function
 check_for_updates
 
-# Display Title with a Frame
-echo -e "${CYAN}====================================================${NC}"
-echo -e "     ${BOLD}Welcome to VeriNexus Speed Test 2024${NC}"
-echo -e "${CYAN}====================================================${NC}"
-echo -e "${YELLOW}(C) 2024 VeriNexus. All Rights Reserved.${NC}"
-echo -e "${YELLOW}Script Version: $SCRIPT_VERSION${NC}"
-
-# Fancy Progress Bar Function
-progress_bar() {
-    echo -n -e "["
-    for i in {1..50}; do
-        echo -n -e "${CYAN}#${NC}"
-        sleep 0.02
-    done
-    echo -e "]"
-}
-
-echo -e "${BLUE}${BOLD}Starting VeriNexus Speed Test...${NC}"
-progress_bar
-
-# Step 1: Running Speed Test with retry logic
+# Step 1: Running Speed Test
 run_speed_test
 if [ $? -ne 0 ]; then
     log_error "Speed Test failed after maximum attempts."
@@ -245,47 +186,24 @@ fi
 # Step 2: Fetching Date and Time (UK Time - GMT/BST)
 UK_DATE=$(TZ="Europe/London" date +"%Y-%m-%d")
 UK_TIME=$(TZ="Europe/London" date +"%H:%M:%S")
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 2: Fetching Date and Time (UK Time)" "Date (UK): $UK_DATE, Time (UK): $UK_TIME"
 
 # Step 3: Fetching Private/Public IPs
-if [ "$FORCE_FAIL_PRIVATE_IP" = true ]; then
-    log_error "Forced failure to fetch Private IP."
-    PRIVATE_IP="N/A"
-else
-    PRIVATE_IP=$(hostname -I | awk '{print $1}')
-fi
-
-if [ "$FORCE_FAIL_PUBLIC_IP" = true ]; then
-    log_error "Forced failure to fetch Public IP."
-    PUBLIC_IP="N/A"
-else
-    PUBLIC_IP=$(curl -s ifconfig.co)
-fi
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 3: Fetching Private/Public IPs" "Private IP: $PRIVATE_IP, Public IP: $PUBLIC_IP"
+PRIVATE_IP=$(hostname -I | awk '{print $1}')
+PUBLIC_IP=$(curl -s ifconfig.co)
 
 # Step 4: Fetching MAC Address and LAN IP
 ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
-if [ "$FORCE_FAIL_MAC" = true ]; then
-    log_error "Forced failure to fetch MAC Address."
-    MAC_ADDRESS="N/A"
-elif [ -n "$ACTIVE_IFACE" ]; then
-    MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
-    LAN_IP=$(ip addr show $ACTIVE_IFACE | grep "inet " | awk '{print $2}' | cut -d/ -f1)
-    printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 4: Fetching LAN IP" "LAN IP: $LAN_IP"
-else
-    log_error "Could not determine active network interface."
-    LAN_IP="N/A"
-fi
+MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
+LAN_IP=$(ip addr show $ACTIVE_IFACE | grep "inet " | awk '{print $2}' | cut -d/ -f1)
 
-# Step 5: Extracting the relevant fields
+# Step 5: Extracting Speedtest Data (Escaping and Unquoting Properly)
 SERVER_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
-SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}')
-LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}')
-LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')   # Latency is in field 6
-DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $7 / 1000000}')  # Convert download speed from bps to Mbps
-UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $8 / 1000000}')    # Convert upload speed from bps to Mbps
-PUBLIC_IP=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $10}')  # Public IP is in field 10
-
+SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}' | sed 's/ /\\ /g' | sed 's/,/\\,/g')  # Escape spaces and commas
+LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}' | sed 's/ /\\ /g' | sed 's/,/\\,/g')    # Escape spaces and commas
+LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')
+DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $7 / 1000000}')
+UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $8 / 1000000}')
+PUBLIC_IP=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $10}')
 
 if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" || -z "$LATENCY" || -z "$PUBLIC_IP" ]]; then
     log_error "Speed Test did not return valid data."
@@ -294,84 +212,10 @@ if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" || -z "$LATENCY" || -z "$PUBLIC
     LATENCY="0.00"
     PUBLIC_IP="N/A"
 fi
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 5: Converting Speed Results" "Download Speed: $DOWNLOAD_SPEED Mbps, Upload Speed: $UPLOAD_SPEED Mbps, Latency: $LATENCY ms"
 
-# Step 6: Extracting Shareable ID
-SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
-SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 6: Extracting Shareable ID" "Shareable ID: $SHARE_ID"
-
-# Step 7: Saving Results (Remove the distance and jitter fields)
-HOSTNAME=$(hostname)
-CLIENT_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
-SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}')
-LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}')
-LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')   # Latency is in field 6
-
-RESULT_LINE="$SERVER_ID,$SERVER_NAME,$LOCATION,$LATENCY,$DOWNLOAD_SPEED,$UPLOAD_SPEED,$PUBLIC_IP,$LAN_IP,$HOSTNAME,$UK_DATE,$UK_TIME,$MAC_ADDRESS"
-
-# Define the header for the CSV file
-HEADER_LINE="Server ID,Server Name,Location,Latency (ms),Download Speed (Mbps),Upload Speed (Mbps),Public IP,LAN IP,Hostname,Date (UK),Time (UK),MAC Address"
-
-# Check if the CSV file exists and is non-empty, if not, add the header
-sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
-    if [ ! -s '$REMOTE_PATH' ]; then
-        echo '$HEADER_LINE' >> '$REMOTE_PATH'
-    fi
-"
-
-# Run the SSH command with password authentication to save results
-echo -e "${BLUE}Running SSH command to save results...${NC}"
-ssh_attempts=0
-max_ssh_attempts=3
-while [ $ssh_attempts -lt $max_ssh_attempts ]; do
-    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" \
-    "echo '$RESULT_LINE' >> '$REMOTE_PATH'"
-    if [ $? -eq 0 ]; then
-        printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 7: Saving Results" "Results saved to the remote server."
-        break
-    else
-        log_error "Failed to save results to remote server. Retrying...($ssh_attempts)"
-        ssh_attempts=$((ssh_attempts + 1))
-        sleep 5
-    fi
-done
-
-# If any errors occurred, upload the error log
-if [ -n "$ERROR_LOG" ]; then
-    echo -e "${BLUE}Uploading error log...${NC}"
-    # Create a temporary file for the error log
-    TEMP_ERROR_LOG=$(mktemp)
-    echo -e "$ERROR_LOG" > "$TEMP_ERROR_LOG"
-
-    # Upload the error log and implement size limitation on the remote server
-    sshpass -p "$REMOTE_PASS" scp -o StrictHostKeyChecking=no "$TEMP_ERROR_LOG" "$REMOTE_USER@$REMOTE_HOST:/tmp/error_temp.txt"
-    sshpass -p "$REMOTE_PASS" ssh -o StrictHostKeyChecking=no "$REMOTE_USER@$REMOTE_HOST" "
-        if [ -f '$ERROR_LOG_PATH' ]; then
-            mv '$ERROR_LOG_PATH' '/tmp/old_error_log.txt'
-            cat /tmp/error_temp.txt /tmp/old_error_log.txt > '$ERROR_LOG_PATH'
-            rm /tmp/old_error_log.txt
-        else
-            mv /tmp/error_temp.txt '$ERROR_LOG_PATH'
-        fi
-        rm /tmp/error_temp.txt
-        FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
-        MAX_SIZE=$MAX_ERROR_LOG_SIZE
-        if [ \$FILE_SIZE -gt \$MAX_SIZE ]; then
-            while [ \$FILE_SIZE -gt \$MAX_SIZE ]; do
-                sed -i '1d' '$ERROR_LOG_PATH'  # Delete older entries to maintain latest logs
-                FILE_SIZE=\$(stat -c%s '$ERROR_LOG_PATH')
-            done
-        fi
-    "
-
-    if [ $? -eq 0 ]; then
-        echo -e "${CHECKMARK} All errors logged and uploaded."
-    else
-        echo -e "${CROSS} ${RED}Failed to upload error log to the remote server.${NC}"
-    fi
-    rm -f "$TEMP_ERROR_LOG"
-fi
+# Step 6: Writing Results to InfluxDB (Tags Unquoted, Fields Quoted Properly)
+curl -i -XPOST "$INFLUXDB_URL/write?db=$INFLUXDB_DB" --data-binary \
+"$INFLUXDB_MEASUREMENT,server_id=$SERVER_ID,server_name=$SERVER_NAME,location=$LOCATION latency=$LATENCY,download_speed=$DOWNLOAD_SPEED,upload_speed=$UPLOAD_SPEED,public_ip=\"$PUBLIC_IP\",mac_address=\"$MAC_ADDRESS\",lan_ip=\"$LAN_IP\",hostname=\"$HOSTNAME\",date=\"$UK_DATE\",time=\"$UK_TIME\""
 
 # Footer
 echo -e "${CYAN}====================================================${NC}"
