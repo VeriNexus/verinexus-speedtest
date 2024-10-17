@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.3.11"
+SCRIPT_VERSION="2.3.12"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -29,6 +29,31 @@ NC='\033[0m' # No Color
 # Symbols
 CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
+
+# Function to check dependencies
+check_dependencies() {
+    local missing_dependencies=false
+
+    # Check if 'awk' is installed
+    if ! command -v awk &> /dev/null; then
+        echo -e "${CROSS} ${RED}Error: awk is not installed.${NC}"
+        missing_dependencies=true
+    fi
+
+    # Check if 'curl' is installed (used for updates and network calls)
+    if ! command -v curl &> /dev/null; then
+        echo -e "${CROSS} ${RED}Error: curl is not installed.${NC}"
+        missing_dependencies=true
+    fi
+
+    if [ "$missing_dependencies" = true ]; then
+        echo -e "${CROSS} ${RED}Please install the missing dependencies and rerun the script.${NC}"
+        exit 1
+    fi
+}
+
+# Call the check_dependencies function early in the script
+check_dependencies
 
 # Function to log errors without stopping the script
 log_error() {
