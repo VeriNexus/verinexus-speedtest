@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.3.6"
+SCRIPT_VERSION="2.3.7"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -65,6 +65,25 @@ check_dependencies() {
     else
         echo -e "${CHECKMARK} All dependencies are already installed.${NC}"
     fi
+}
+
+# Function to compare versions using awk (Reintroduced)
+version_gt() {
+    awk -v v1="$1" -v v2="$2" '
+    BEGIN {
+        split(v1, a, ".")
+        split(v2, b, ".")
+        for (i = 1; i <= length(a) || i <= length(b); i++) {
+            a_i = (i in a) ? a[i] : 0
+            b_i = (i in b) ? b[i] : 0
+            if (a_i > b_i) {
+                exit 0  # v1 > v2
+            } else if (a_i < b_i) {
+                exit 1  # v1 < v2
+            }
+        }
+        exit 1  # v1 == v2
+    }'
 }
 
 # Function to check for forced error file and apply its effects
