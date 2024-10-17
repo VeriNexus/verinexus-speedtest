@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.3.8"
+SCRIPT_VERSION="2.3.11"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -13,7 +13,7 @@ FORCED_ERROR_FILE="/tmp/force_error.txt"
 ERROR_LOG=""
 MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
 
-# InfluxDB details
+# InfluxDB Configuration
 INFLUXDB_SERVER="http://82.165.7.116:8086"
 INFLUXDB_DB="speedtest_db"
 INFLUXDB_MEASUREMENT="speedtest"
@@ -43,7 +43,7 @@ log_error() {
     local active_iface=$(ip route | grep default | awk '{print $5}')
     local mac_address=$(cat /sys/class/net/$active_iface/address)  # Get MAC address
 
-    # Format the error log entry
+    # Format the error log entry as a single line in CSV format, including the MAC address
     local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,$mac_address,\"$error_message\""
 
     echo -e "${CROSS} ${RED}Error: $error_message${NC}"
@@ -61,7 +61,13 @@ apply_forced_errors() {
         if bash -n "$FORCED_ERROR_FILE"; then
             . "$FORCED_ERROR_FILE"
         else
-            log_error "Invalid forced error file syntax."
+            log_error "Forced error file contains invalid syntax. Deleting local copy."
+            rm -f "$FORCED_ERROR_FILE"
+        fi
+    else
+        # If the forced error file was previously downloaded but no longer exists in the repo, remove it
+        if [ -f "$FORCED_ERROR_FILE" ]; then
+            echo -e "${YELLOW}Forced error file removed from GitHub. Deleting local copy...${NC}"
             rm -f "$FORCED_ERROR_FILE"
         fi
     fi
@@ -73,7 +79,7 @@ version_gt() {
     BEGIN {
         split(v1, a, ".")
         split(v2, b, ".")
-        for (i = 1; i <= length(a) || i <= length(b); i++) {
+        for (i = 1; i <= 3; i++) {
             a_i = (i in a) ? a[i] : 0
             b_i = (i in b) ? b[i] : 0
             if (a_i > b_i) {
@@ -86,7 +92,7 @@ version_gt() {
     }'
 }
 
-# Function to check for updates
+# Function to check for updates with retry logic
 check_for_updates() {
     echo -e "${CYAN}====================================================${NC}"
     echo -e "           ${BOLD}Checking for Script Updates...${NC}"
@@ -111,11 +117,13 @@ check_for_updates() {
         sleep 5
     done
 
+    # Ensure the downloaded file is valid
     if [ ! -s "$TEMP_SCRIPT" ]; then
         log_error "Downloaded script is empty."
         return 1
     fi
 
+    # Extract version from the downloaded script
     LATEST_VERSION=$(grep -oP 'SCRIPT_VERSION="\K[0-9.]+' "$TEMP_SCRIPT")
     if [ -z "$LATEST_VERSION" ]; then
         log_error "Failed to extract version from the downloaded script."
@@ -125,6 +133,7 @@ check_for_updates() {
     echo -e "${CHECKMARK} Current version: ${YELLOW}$SCRIPT_VERSION${NC}"
     echo -e "${CHECKMARK} Latest version: ${YELLOW}$LATEST_VERSION${NC}"
 
+    # Compare versions to check if we should upgrade
     if version_gt "$LATEST_VERSION" "$SCRIPT_VERSION"; then
         echo -e "${YELLOW}New version available: $LATEST_VERSION${NC}"
         cp "$TEMP_SCRIPT" "$0"
@@ -138,7 +147,7 @@ check_for_updates() {
     echo -e "${CYAN}====================================================${NC}"
 }
 
-# Function to test speed and store the results in InfluxDB
+# Retry function to retry the speed test in case of failure
 run_speed_test() {
     local attempts=0
     local max_attempts=3
@@ -158,27 +167,7 @@ run_speed_test() {
     if [ $attempts -eq $max_attempts ]; then
         return 1  # Fail if all attempts failed
     fi
-
-    # Extract fields from speedtest output
-    SERVER_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
-    SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}' | sed 's/ /\\ /g' | sed 's/,/\\,/g')  # Escape spaces and commas
-    LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}' | sed 's/ /\\ /g' | sed 's/,/\\,/g')    # Escape spaces and commas
-    LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')
-    DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $7 / 1000000}')
-    UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $8 / 1000000}')
-    PUBLIC_IP=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $10}')
-
-    if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" || -z "$LATENCY" || -z "$PUBLIC_IP" ]]; then
-        log_error "Speed Test did not return valid data."
-        DOWNLOAD_SPEED="0.00"
-        UPLOAD_SPEED="0.00"
-        LATENCY="0.00"
-        PUBLIC_IP="N/A"
-    fi
-
-    # Send the results to InfluxDB
-    curl -i -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary \
-    "$INFLUXDB_MEASUREMENT,server_id=$SERVER_ID,server_name=\"$SERVER_NAME\",location=\"$LOCATION\" latency=$LATENCY,download_speed=$DOWNLOAD_SPEED,upload_speed=$UPLOAD_SPEED,public_ip=\"$PUBLIC_IP\",mac_address=\"$MAC_ADDRESS\",lan_ip=\"$LAN_IP\",hostname=\"$HOSTNAME\",date=\"$UK_DATE\",time=\"$UK_TIME\""
+    return 0
 }
 
 # Apply any forced errors
@@ -194,134 +183,96 @@ echo -e "${CYAN}====================================================${NC}"
 echo -e "${YELLOW}(C) 2024 VeriNexus. All Rights Reserved.${NC}"
 echo -e "${YELLOW}Script Version: $SCRIPT_VERSION${NC}"
 
-# Run the speed test and store results in InfluxDB
-run_speed_test
+# Fancy Progress Bar Function
+progress_bar() {
+    echo -n -e "["
+    for i in {1..50}; do
+        echo -n -e "${CYAN}#${NC}"
+        sleep 0.02
+    done
+    echo -e "]"
+}
 
+echo -e "${BLUE}${BOLD}Starting VeriNexus Speed Test...${NC}"
+progress_bar
+
+# Step 1: Running Speed Test with retry logic
+run_speed_test
+if [ $? -ne 0 ]; then
+    log_error "Speed Test failed after maximum attempts."
+    exit 1
+fi
+
+# Step 2: Fetching Date and Time (UK Time - GMT/BST)
+UK_DATE=$(TZ="Europe/London" date +"%Y-%m-%d")
+UK_TIME=$(TZ="Europe/London" date +"%H:%M:%S")
+printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 2: Fetching Date and Time (UK Time)" "Date (UK): $UK_DATE, Time (UK): $UK_TIME"
+
+# Step 3: Fetching Private/Public IPs
+if [ "$FORCE_FAIL_PRIVATE_IP" = true ]; then
+    log_error "Forced failure to fetch Private IP."
+    PRIVATE_IP="N/A"
+else
+    PRIVATE_IP=$(hostname -I | awk '{print $1}')
+fi
+
+if [ "$FORCE_FAIL_PUBLIC_IP" = true ]; then
+    log_error "Forced failure to fetch Public IP."
+    PUBLIC_IP="N/A"
+else
+    PUBLIC_IP=$(curl -s ifconfig.co)
+fi
+printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 3: Fetching Private/Public IPs" "Private IP: $PRIVATE_IP, Public IP: $PUBLIC_IP"
+
+# Step 4: Fetching MAC Address and LAN IP
+ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
+if [ "$FORCE_FAIL_MAC" = true ]; then
+    log_error "Forced failure to fetch MAC Address."
+    MAC_ADDRESS="N/A"
+elif [ -n "$ACTIVE_IFACE" ]; then
+    MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
+    LAN_IP=$(ip addr show $ACTIVE_IFACE | grep "inet " | awk '{print $2}' | cut -d/ -f1)
+    printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 4: Fetching LAN IP" "LAN IP: $LAN_IP"
+else
+    log_error "Could not determine active network interface."
+    LAN_IP="N/A"
+fi
+
+# Step 5: Extracting the relevant fields
+SERVER_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
+SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}' | sed 's/\"//g' | sed 's/ /\\ /g') # Escape spaces and remove quotes
+LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}' | sed 's/\"//g' | sed 's/ /\\ /g')    # Escape spaces and remove quotes
+LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')   # Latency is in field 6
+DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $7 / 1000000}')  # Convert download speed from bps to Mbps
+UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $8 / 1000000}')    # Convert upload speed from bps to Mbps
+PUBLIC_IP=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $10}')
+
+if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" || -z "$LATENCY" || -z "$PUBLIC_IP" ]]; then
+    log_error "Speed Test did not return valid data."
+    DOWNLOAD_SPEED="0.00"
+    UPLOAD_SPEED="0.00"
+    LATENCY="0.00"
+    PUBLIC_IP="N/A"
+fi
+
+printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 5: Converting Speed Results" "Download Speed: $DOWNLOAD_SPEED Mbps, Upload Speed: $UPLOAD_SPEED Mbps, Latency: $LATENCY ms"
+
+# Step 6: Extracting Shareable ID
+SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
+SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
+printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 6: Extracting Shareable ID" "Shareable ID: $SHARE_ID"
+
+# Step 7: Saving Results to InfluxDB
+HOSTNAME=$(hostname)
+
+# Format data for InfluxDB (escaping special characters properly)
+INFLUXDB_DATA="speedtest,server_id=$SERVER_ID,server_name=$SERVER_NAME,location=$LOCATION latency=$LATENCY,download_speed=$DOWNLOAD_SPEED,upload_speed=$UPLOAD_SPEED,public_ip=\"$PUBLIC_IP\",lan_ip=\"$LAN_IP\",hostname=\"$HOSTNAME\",date=\"$UK_DATE\",time=\"$UK_TIME\",mac_address=\"$MAC_ADDRESS\""
+
+# Post to InfluxDB
+curl -i -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$INFLUXDB_DATA"
+
+
+# Footer
 echo -e "${CYAN}====================================================${NC}"
 echo -e "${BOLD}VeriNexus Speed Test Completed Successfully!${NC}"
 echo -e "${CYAN}====================================================${NC}"
-#!/bin/bash
-
-# Version number of the script
-SCRIPT_VERSION="2.3.8"
-
-# GitHub repository raw URLs for the script and forced error file
-REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
-FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
-
-# Temporary files for comparison and forced error
-TEMP_SCRIPT="/tmp/latest_speedtest.sh"
-FORCED_ERROR_FILE="/tmp/force_error.txt"
-ERROR_LOG=""
-MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
-
-# InfluxDB details
-INFLUXDB_SERVER="http://82.165.7.116:8086"
-INFLUXDB_DATABASE="speedtest_db"
-
-# ANSI Color Codes
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[1;34m'
-CYAN='\033[1;36m'
-NC='\033[0m' # No Color
-
-# Symbols
-CHECKMARK="${GREEN}✔${NC}"
-CROSS="${RED}✖${NC}"
-
-# Function to log errors without stopping the script
-log_error() {
-    local error_message="$1"
-    local timestamp_ms=$(($(date +%s%N)/1000000))  # Unix timestamp in milliseconds
-    local timestamp="$(TZ='Europe/London' date +"%Y-%m-%d %H:%M:%S")"
-    local error_id="$timestamp_ms"
-    local hostname="$(hostname)"
-    local private_ip="$(hostname -I | awk '{print $1}')"
-    local public_ip="$(curl -s ifconfig.co)"
-    local script_version="$SCRIPT_VERSION"
-    local active_iface=$(ip route | grep default | awk '{print $5}')
-    local mac_address=$(cat /sys/class/net/$active_iface/address)
-
-    # Format the error log entry
-    local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,$mac_address,\"$error_message\""
-
-    echo -e "${CROSS} ${RED}Error: $error_message${NC}"
-}
-
-# Function to check for forced error file and apply its effects
-apply_forced_errors() {
-    curl -s -H 'Cache-Control: no-cache, no-store, must-revalidate' \
-         -H 'Pragma: no-cache' \
-         -H 'Expires: 0' \
-         -o "$FORCED_ERROR_FILE" "$FORCED_ERROR_URL"
-
-    if [ -s "$FORCED_ERROR_FILE" ]; then
-        echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
-        if bash -n "$FORCED_ERROR_FILE"; then
-            . "$FORCED_ERROR_FILE"
-        else
-            log_error "Invalid forced error file syntax."
-            rm -f "$FORCED_ERROR_FILE"
-        fi
-    fi
-}
-
-# Function to check for updates
-check_for_updates() {
-    echo -e "${CYAN}Checking for Script Updates...${NC}"
-    rm -f "$TEMP_SCRIPT"
-
-    curl -s -H 'Cache-Control: no-cache, no-store, must-revalidate' \
-         -o "$TEMP_SCRIPT" "$REPO_RAW_URL"
-
-    LATEST_VERSION=$(grep -oP 'SCRIPT_VERSION="\K[0-9.]+' "$TEMP_SCRIPT")
-    if [ -z "$LATEST_VERSION" ]; then
-        log_error "Failed to retrieve the latest version."
-        return 1
-    fi
-
-    if awk -v v1="$LATEST_VERSION" -v v2="$SCRIPT_VERSION" 'BEGIN {
-            split(v1, a, "."); split(v2, b, ".");
-            for (i=1; i<=length(a); i++) if (a[i] != b[i]) exit a[i] > b[i];
-            exit 0;
-        }'; then
-        cp "$TEMP_SCRIPT" "$0"
-        chmod +x "$0"
-        echo -e "${CHECKMARK} Update completed. Please re-run the script."
-        exit 0
-    else
-        echo -e "${GREEN}No updates available.${NC}"
-    fi
-}
-
-# Function to test speed and store the results
-run_speed_test() {
-    SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
-    IFS=',' read -r SERVER_ID SERVER_NAME LOCATION LATENCY DOWNLOAD_SPEED UPLOAD_SPEED _ PUBLIC_IP <<< "$SPEEDTEST_OUTPUT"
-
-    # Check if values are valid
-    if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" || -z "$LATENCY" ]]; then
-        log_error "Speed Test returned invalid results."
-        return 1
-    fi
-
-    # Prepare the InfluxDB line protocol entry
-    INFLUX_LINE="speedtest,server_id=$SERVER_ID,server_name=\"$SERVER_NAME\",location=\"$LOCATION\" latency=$LATENCY,download_speed=$DOWNLOAD_SPEED,upload_speed=$UPLOAD_SPEED,public_ip=\"$PUBLIC_IP\",hostname=\"$(hostname)\",lan_ip=\"$(hostname -I | awk '{print $1}')\""
-
-    # Send the results to InfluxDB
-    curl -i -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DATABASE" --data-binary "$INFLUX_LINE"
-
-    return 0
-}
-
-# Main execution starts here
-apply_forced_errors
-check_for_updates
-
-echo -e "${CYAN}Starting VeriNexus Speed Test...${NC}"
-
-run_speed_test || log_error "Failed to complete speed test."
-
-echo -e "${CYAN}VeriNexus Speed Test Completed!${NC}"
