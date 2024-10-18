@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.3.12"
+SCRIPT_VERSION="2.3.13"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -290,12 +290,11 @@ printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 6: Extracting Shareable ID" "S
 # Step 7: Saving Results to InfluxDB
 HOSTNAME=$(hostname)
 
-# Format data for InfluxDB (escaping special characters properly)
-INFLUXDB_DATA="speedtest,server_id=$SERVER_ID,server_name=$SERVER_NAME,location=$LOCATION latency=$LATENCY,download_speed=$DOWNLOAD_SPEED,upload_speed=$UPLOAD_SPEED,public_ip=\"$PUBLIC_IP\",lan_ip=\"$LAN_IP\",hostname=\"$HOSTNAME\",date=\"$UK_DATE\",time=\"$UK_TIME\",mac_address=\"$MAC_ADDRESS\""
+# Format data for InfluxDB (ensure correct escaping for InfluxDB line protocol)
+INFLUXDB_DATA="speedtest,mac_address=$MAC_ADDRESS,server_id=$SERVER_ID,server_name=\"$SERVER_NAME\",location=\"$LOCATION\" latency=$LATENCY,download_speed=$DOWNLOAD_SPEED,upload_speed=$UPLOAD_SPEED,public_ip=\"$PUBLIC_IP\",lan_ip=\"$LAN_IP\",hostname=\"$HOSTNAME\",date=\"$UK_DATE\",time=\"$UK_TIME\""
 
-# Post to InfluxDB
+# Post to InfluxDB (use curl to send data)
 curl -i -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$INFLUXDB_DATA"
-
 
 # Footer
 echo -e "${CYAN}====================================================${NC}"
