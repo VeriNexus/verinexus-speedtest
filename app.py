@@ -18,7 +18,7 @@ def index():
     query = 'SELECT * FROM speedtest'
     result = client.query(query)
     points = list(result.get_points())
-    return render_template('index.html', points=points, version=APP_VERSION)
+    return render_template('index.html', points=points, app_version=APP_VERSION)
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
