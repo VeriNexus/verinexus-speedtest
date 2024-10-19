@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# URL to view result on speedtest.net
+# To view a result on speedtest.net, use this URL followed by the field_share_id:
+# www.speedtest.net/result/
+
 # Version number of the script
 SCRIPT_VERSION="2.3.19"
 

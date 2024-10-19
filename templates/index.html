@@ -3,31 +3,46 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Network Speed Test</title>
+    <title>Speed Test Results</title>
 </head>
 <body>
-    <form method="POST">
-        <label for="mac_address">MAC Address:</label>
-        <select name="mac_address" id="mac_address">
-            {% for mac in mac_addresses %}
-            <option value="{{ mac }}">{{ mac }}</option>
-            {% endfor %}
-        </select>
-
-        <label for="start_date">Start Date:</label>
-        <input type="date" name="start_date" id="start_date">
-
-        <label for="end_date">End Date:</label>
-        <input type="date" name="end_date" id="end_date">
-
-        <button type="submit">Submit</button>
-    </form>
-
-    {% if plot_url %}
-    <h3>Network Speed Over Time</h3>
-    <img src="data:image/png;base64,{{ plot_url }}" alt="Network Speed Plot">
-    {% else %}
-    <p>No data available for the selected criteria.</p>
-    {% endif %}
+    <h1>Speed Test Results</h1>
+    <p>Version: {{ version }}</p>
+    <table border="1">
+        <tr>
+            <th>Time</th>
+            <th>Date</th>
+            <th>Download Speed</th>
+            <th>LAN IP</th>
+            <th>Latency</th>
+            <th>Server Name</th>
+            <th>Share ID</th>
+            <th>Time</th>
+            <th>Upload Speed</th>
+            <th>Hostname</th>
+            <th>Location</th>
+            <th>MAC Address</th>
+            <th>Public IP</th>
+            <th>Server ID</th>
+        </tr>
+        {% for point in points %}
+        <tr>
+            <td>{{ point['time'] }}</td>
+            <td>{{ point['field_date'] }}</td>
+            <td>{{ point['field_download_speed'] }}</td>
+            <td>{{ point['field_lan_ip'] }}</td>
+            <td>{{ point['field_latency'] }}</td>
+            <td>{{ point['field_server_name'] }}</td>
+            <td>{{ point['field_share_id'] }}</td>
+            <td>{{ point['field_time'] }}</td>
+            <td>{{ point['field_upload_speed'] }}</td>
+            <td>{{ point['tag_hostname'] }}</td>
+            <td>{{ point['tag_location'] }}</td>
+            <td>{{ point['tag_mac_address'] }}</td>
+            <td>{{ point['tag_public_ip'] }}</td>
+            <td>{{ point['tag_server_id'] }}</td>
+        </tr>
+        {% endfor %}
+    </table>
 </body>
 </html>
