@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.3.14"
+SCRIPT_VERSION="2.3.15"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -15,7 +15,7 @@ MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
 
 # InfluxDB Configuration
 INFLUXDB_SERVER="http://82.165.7.116:8086"
-INFLUXDB_DB="speedtest_db"
+INFLUXDB_DB="speedtest_db_clean"
 INFLUXDB_MEASUREMENT="speedtest"
 
 # ANSI Color Codes
@@ -290,7 +290,7 @@ printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 6: Extracting Shareable ID" "S
 # Step 7: Saving Results to InfluxDB
 HOSTNAME=$(hostname)
 
-INFLUXDB_DATA="speedtest,mac_address=$MAC_ADDRESS,server_id=$SERVER_ID,public_ip=$PUBLIC_IP latency=$LATENCY,download_speed=$DOWNLOAD_SPEED,upload_speed=$UPLOAD_SPEED"
+INFLUXDB_DATA="speedtest,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED"
 curl -i -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$INFLUXDB_DATA"
 
 # Footer
