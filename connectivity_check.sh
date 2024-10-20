@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.1"
+SCRIPT_VERSION="1.2"
 
 # GitHub repository raw URL for the script
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/connectivity_check.sh"
@@ -52,18 +52,28 @@ rotate_log_file() {
     fi
 }
 
+# Function to get MAC address
+get_mac_address() {
+    ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
+    if [ -n "$ACTIVE_IFACE" ]; then
+        MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
+    else
+        MAC_ADDRESS="00:00:00:00:00:00"
+        log_message "WARN" "Could not determine active network interface."
+    fi
+}
+
 # Function to log messages with levels
 log_message() {
     local level="$1"
     local message="$2"
     local timestamp="$(date +"%Y-%m-%d %H:%M:%S")"
-    local hostname="$(hostname)"
     local script_version="$SCRIPT_VERSION"
 
     if [[ " ${LOG_LEVELS[*]} " == *" $level "* ]]; then
-        echo "$timestamp [$hostname] [Version $script_version] [$level]: $message" >> "$LOG_FILE"
+        echo "$timestamp [Version $script_version] [$level]: $message" >> "$LOG_FILE"
     else
-        echo "$timestamp [$hostname] [Version $script_version] [UNKNOWN]: $message" >> "$LOG_FILE"
+        echo "$timestamp [Version $script_version] [UNKNOWN]: $message" >> "$LOG_FILE"
     fi
 }
 
@@ -73,7 +83,7 @@ rotate_log_file
 # Function to check dependencies
 check_dependencies() {
     local missing_dependencies=false
-    local dependencies=("curl" "ping" "tput")
+    local dependencies=("curl" "ping" "tput" "ip" "awk")
 
     for dep in "${dependencies[@]}"; do
         if ! command -v $dep &> /dev/null; then
@@ -91,6 +101,9 @@ check_dependencies() {
 
 # Call the check_dependencies function early in the script
 check_dependencies
+
+# Get MAC address
+get_mac_address
 
 # Function to compare versions
 version_gt() {
@@ -215,8 +228,7 @@ check_connectivity() {
         fi
 
         # Prepare data for InfluxDB
-        local hostname=$(hostname)
-        local data="$INFLUXDB_MEASUREMENT,host=$hostname status=\"$status\" $((timestamp * 1000000000))"
+        local data="$INFLUXDB_MEASUREMENT,mac_address=$MAC_ADDRESS status=\"$status\" $((timestamp * 1000000000))"
 
         # Send data to InfluxDB
         curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$data"
@@ -232,8 +244,7 @@ check_connectivity() {
 # Function to send heartbeat
 send_heartbeat() {
     local timestamp=$(date +%s)
-    local hostname=$(hostname)
-    local data="$HEARTBEAT_MEASUREMENT,host=$hostname running=1 $((timestamp * 1000000000))"
+    local data="$HEARTBEAT_MEASUREMENT,mac_address=$MAC_ADDRESS running=1 $((timestamp * 1000000000))"
     curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$data"
 }
 
