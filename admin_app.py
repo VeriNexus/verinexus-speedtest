@@ -16,9 +16,24 @@ def create_database_if_not_exists(db_name):
     if not any(db['name'] == db_name for db in databases):
         client.create_database(db_name)
 
-# Ensure the test_db exists
+def ensure_measurement_exists(db_name, measurement):
+    test_data = [
+        {
+            "measurement": measurement,
+            "tags": {
+                "endpoint": "example.com"
+            },
+            "fields": {
+                "value": 1
+            }
+        }
+    ]
+    client.switch_database(db_name)
+    client.write_points(test_data)
+
+# Ensure the test_db exists and the measurement is correctly formatted
 create_database_if_not_exists(INFLUXDB_DB)
-client.switch_database(INFLUXDB_DB)
+ensure_measurement_exists(INFLUXDB_DB, INFLUXDB_MEASUREMENT)
 
 @app.route('/')
 def index():
@@ -49,6 +64,11 @@ def delete_endpoint():
     endpoint = request.form['endpoint']
     query = f"DELETE FROM {INFLUXDB_MEASUREMENT} WHERE \"endpoint\"='{endpoint}'"
     client.query(query)
+    return redirect(url_for('index'))
+
+@app.route('/dropdb', methods=['POST'])
+def drop_database():
+    client.drop_database(INFLUXDB_DB)
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
