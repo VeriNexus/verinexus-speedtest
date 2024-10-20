@@ -5,7 +5,7 @@
 # www.speedtest.net/result/
 
 # Version number of the script
-SCRIPT_VERSION="2.3.30"
+SCRIPT_VERSION="2.3.31"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -37,12 +37,12 @@ CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
 
 # Function to ensure the measurement exists with the correct field types
-ensure_measurement_exists() {
-    local db_name=$1
-    local measurement=$2
-    local test_data="endpoints,endpoint=example.com value=1i"
-    curl -i -XPOST "$INFLUXDB_SERVER/write?db=$db_name" --data-binary "$test_data"
-}
+#ensure_measurement_exists() {
+#    local db_name=$1
+#    local measurement=$2
+#    local test_data="endpoints,endpoint=example.com value=1i"
+#    curl -i -XPOST "$INFLUXDB_SERVER/write?db=$db_name" --data-binary "$test_data"
+#}
 
 
 # Function to check dependencies
@@ -357,7 +357,7 @@ create_database_if_not_exists "$INFLUXDB_DB"
 create_database_if_not_exists "$INFLUXDB_TEST_DB"
 
 # Ensure the measurement exists with the correct field types
-ensure_measurement_exists "$INFLUXDB_TEST_DB" "$INFLUXDB_TEST_MEASUREMENT"
+# ensure_measurement_exists "$INFLUXDB_TEST_DB" "$INFLUXDB_TEST_MEASUREMENT"
 
 # Perform ping tests
 perform_ping_tests
