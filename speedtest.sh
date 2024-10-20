@@ -5,7 +5,7 @@
 # www.speedtest.net/result/
 
 # Version number of the script
-SCRIPT_VERSION="2.3.19"
+SCRIPT_VERSION="2.3.20"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -21,6 +21,8 @@ MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
 INFLUXDB_SERVER="http://82.165.7.116:8086"
 INFLUXDB_DB="speedtest_db_clean"
 INFLUXDB_MEASUREMENT="speedtest"
+INFLUXDB_TEST_DB="test_db"
+INFLUXDB_TEST_MEASUREMENT="endpoints"
 
 # ANSI Color Codes
 RED='\033[0;31m'
@@ -50,6 +52,11 @@ check_dependencies() {
         missing_dependencies=true
     fi
 
+    if ! command -v jq &> /dev/null; then
+        echo -e "${CROSS} ${RED}Error: jq is not installed.${NC}"
+        missing_dependencies=true
+    fi
+
     if [ "$missing_dependencies" = true ]; then
         echo -e "${CROSS} ${RED}Please install the missing dependencies and rerun the script.${NC}"
         exit 1
@@ -76,6 +83,22 @@ log_error() {
     local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,$mac_address,\"$error_message\""
 
     echo -e "${CROSS} ${RED}Error: $error_message${NC}"
+}
+
+# Function to perform ping tests
+perform_ping_tests() {
+    local endpoints=$(curl -s -G "$INFLUXDB_SERVER/query" --data-urlencode "db=$INFLUXDB_TEST_DB" --data-urlencode "q=SELECT endpoint FROM $INFLUXDB_TEST_MEASUREMENT")
+    local endpoint_list=$(echo "$endpoints" | jq -r '.results[0].series[0].values[][1]')
+
+    for endpoint in $endpoint_list; do
+        local ping_result=$(ping -c 1 -s 1 "$endpoint" | grep 'time=' | awk -F'time=' '{print $2}' | awk '{print $1}')
+        if [ -z "$ping_result" ]; then
+            ping_result="N/A"
+        fi
+        echo "Ping to $endpoint: $ping_result ms"
+        # Add the ping result to the InfluxDB data
+        INFLUXDB_DATA="$INFLUXDB_DATA,field_ping_$endpoint=$ping_result"
+    done
 }
 
 # Function to check for forced error file and apply its effects
@@ -296,6 +319,8 @@ HOSTNAME=$(hostname)
 
 # Corrected InfluxDB data preparation
 INFLUXDB_DATA="speedtest,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$HOSTNAME,tag_location=$LOCATION field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\""
+
+perform_ping_tests
 
 # Sending data to InfluxDB.
 curl -i -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$INFLUXDB_DATA"

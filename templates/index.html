@@ -3,147 +3,26 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Speed Test Results</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <title>Admin Interface</title>
 </head>
 <body>
-    <h1>Speed Test Results</h1>
-    <p>App Version: {{ app_version }}</p>
-
-    <!-- Date Selectors -->
-    <label for="startDate">Start Date:</label>
-    <input type="date" id="startDate">
-    <label for="endDate">End Date:</label>
-    <input type="date" id="endDate">
-
-    <!-- MAC Address Selector -->
-    <label for="macAddress">MAC Address:</label>
-    <select id="macAddress">
+    <h1>Admin Interface</h1>
+    <form action="/add" method="post">
+        <label for="endpoint">Endpoint:</label>
+        <input type="text" id="endpoint" name="endpoint" required>
+        <button type="submit">Add Endpoint</button>
+    </form>
+    <h2>Existing Endpoints</h2>
+    <ul>
         {% for point in points %}
-            <option value="{{ point['tag_mac_address'] }}">{{ point['tag_mac_address'] }}</option>
+            <li>
+                {{ point['endpoint'] }}
+                <form action="/delete" method="post" style="display:inline;">
+                    <input type="hidden" name="endpoint" value="{{ point['endpoint'] }}">
+                    <button type="submit">Delete</button>
+                </form>
+            </li>
         {% endfor %}
-    </select>
-
-    <button onclick="updateChart()">Update Chart</button>
-
-    <!-- Canvas for Chart.js -->
-    <canvas id="speedTestChart" width="400" height="200"></canvas>
-
-    <table border="1">
-        <tr>
-            <th>Time</th>
-            <th>Date</th>
-            <th>Download Speed</th>
-            <th>LAN IP</th>
-            <th>Latency</th>
-            <th>Server Name</th>
-            <th>Share ID</th>
-            <th>Time</th>
-            <th>Upload Speed</th>
-            <th>Hostname</th>
-            <th>Location</th>
-            <th>MAC Address</th>
-            <th>Public IP</th>
-            <th>Server ID</th>
-        </tr>
-        {% for point in points %}
-        <tr>
-            <td>{{ point['time'] }}</td>
-            <td>{{ point['field_date'] }}</td>
-            <td>{{ point['field_download_speed'] }}</td>
-            <td>{{ point['field_lan_ip'] }}</td>
-            <td>{{ point['field_latency'] }}</td>
-            <td>{{ point['field_server_name'] }}</td>
-            <td>{{ point['field_share_id'] }}</td>
-            <td>{{ point['field_time'] }}</td>
-            <td>{{ point['field_upload_speed'] }}</td>
-            <td>{{ point['tag_hostname'] }}</td>
-            <td>{{ point['tag_location'] }}</td>
-            <td>{{ point['tag_mac_address'] }}</td>
-            <td>{{ point['tag_public_ip'] }}</td>
-            <td>{{ point['tag_server_id'] }}</td>
-        </tr>
-        {% endfor %}
-    </table>
-
-    <script>
-        // Prepare data for Chart.js
-        const allPoints = {{ points | tojson }};
-        let filteredPoints = allPoints;
-
-        function filterData() {
-            const startDate = document.getElementById('startDate').value;
-            const endDate = document.getElementById('endDate').value;
-            const macAddress = document.getElementById('macAddress').value;
-
-            filteredPoints = allPoints.filter(point => {
-                const pointDate = new Date(point['field_date']);
-                const isWithinDateRange = (!startDate || pointDate >= new Date(startDate)) && (!endDate || pointDate <= new Date(endDate));
-                const isMatchingMacAddress = !macAddress || point['tag_mac_address'] === macAddress;
-                return isWithinDateRange && isMatchingMacAddress;
-            });
-        }
-
-        function updateChart() {
-            filterData();
-
-            const labels = filteredPoints.map(point => point['field_date']);
-            const downloadSpeeds = filteredPoints.map(point => point['field_download_speed']);
-            const uploadSpeeds = filteredPoints.map(point => point['field_upload_speed']);
-
-            const data = {
-                labels: labels,
-                datasets: [
-                    {
-                        label: 'Download Speed (Mbps)',
-                        data: downloadSpeeds,
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                        fill: false,
-                    },
-                    {
-                        label: 'Upload Speed (Mbps)',
-                        data: uploadSpeeds,
-                        borderColor: 'rgba(153, 102, 255, 1)',
-                        backgroundColor: 'rgba(153, 102, 255, 0.2)',
-                        fill: false,
-                    }
-                ]
-            };
-
-            const config = {
-                type: 'line',
-                data: data,
-                options: {
-                    responsive: true,
-                    scales: {
-                        x: {
-                            display: true,
-                            title: {
-                                display: true,
-                                text: 'Date'
-                            }
-                        },
-                        y: {
-                            display: true,
-                            title: {
-                                display: true,
-                                text: 'Speed (Mbps)'
-                            }
-                        }
-                    }
-                }
-            };
-
-            // Render the chart
-            const speedTestChart = new Chart(
-                document.getElementById('speedTestChart'),
-                config
-            );
-        }
-
-        // Initial chart rendering
-        updateChart();
-    </script>
+    </ul>
 </body>
 </html>
