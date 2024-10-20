@@ -5,7 +5,7 @@
 # www.speedtest.net/result/
 
 # Version number of the script
-SCRIPT_VERSION="2.3.20"
+SCRIPT_VERSION="2.3.21"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -35,6 +35,15 @@ NC='\033[0m' # No Color
 # Symbols
 CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
+
+# Function to ensure the measurement exists with the correct field types
+ensure_measurement_exists() {
+    local db_name=$1
+    local measurement=$2
+    local test_data="endpoints,endpoint=example.com value=1i"
+    curl -i -XPOST "$INFLUXDB_SERVER/write?db=$db_name" --data-binary "$test_data"
+}
+
 
 # Function to check dependencies
 check_dependencies() {
@@ -88,7 +97,12 @@ log_error() {
 # Function to perform ping tests
 perform_ping_tests() {
     local endpoints=$(curl -s -G "$INFLUXDB_SERVER/query" --data-urlencode "db=$INFLUXDB_TEST_DB" --data-urlencode "q=SELECT endpoint FROM $INFLUXDB_TEST_MEASUREMENT")
-    local endpoint_list=$(echo "$endpoints" | jq -r '.results[0].series[0].values[][1]')
+    local endpoint_list=$(echo "$endpoints" | jq -r '.results[0].series[0].values[][1] // empty')
+
+    if [ -z "$endpoint_list" ]; then
+        echo "No endpoints found in the test database."
+        return
+    fi
 
     for endpoint in $endpoint_list; do
         local ping_result=$(ping -c 1 -s 1 "$endpoint" | grep 'time=' | awk -F'time=' '{print $2}' | awk '{print $1}')
@@ -99,6 +113,15 @@ perform_ping_tests() {
         # Add the ping result to the InfluxDB data
         INFLUXDB_DATA="$INFLUXDB_DATA,field_ping_$endpoint=$ping_result"
     done
+}
+
+# Function to create database if it doesn't exist
+create_database_if_not_exists() {
+    local db_name=$1
+    local databases=$(curl -s -G "$INFLUXDB_SERVER/query" --data-urlencode "q=SHOW DATABASES")
+    if ! echo "$databases" | grep -q "\"$db_name\""; then
+        curl -i -XPOST "$INFLUXDB_SERVER/query" --data-urlencode "q=CREATE DATABASE $db_name"
+    fi
 }
 
 # Function to check for forced error file and apply its effects
@@ -320,6 +343,14 @@ HOSTNAME=$(hostname)
 # Corrected InfluxDB data preparation
 INFLUXDB_DATA="speedtest,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$HOSTNAME,tag_location=$LOCATION field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\""
 
+# Ensure the databases exist
+create_database_if_not_exists "$INFLUXDB_DB"
+create_database_if_not_exists "$INFLUXDB_TEST_DB"
+
+# Ensure the measurement exists with the correct field types
+ensure_measurement_exists "$INFLUXDB_TEST_DB" "$INFLUXDB_TEST_MEASUREMENT"
+
+# Perform ping tests
 perform_ping_tests
 
 # Sending data to InfluxDB.
