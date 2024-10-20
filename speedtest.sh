@@ -5,7 +5,7 @@
 # www.speedtest.net/result/
 
 # Version number of the script
-SCRIPT_VERSION="2.3.31"
+SCRIPT_VERSION="2.3.32"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -35,6 +35,12 @@ NC='\033[0m' # No Color
 # Symbols
 CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
+
+# Maximum number of retries to prevent infinite loops
+MAX_RETRIES=3
+RETRY_COUNT=0
+
+
 
 # Function to ensure the measurement exists with the correct field types
 #ensure_measurement_exists() {
@@ -222,8 +228,14 @@ check_for_updates() {
         echo -e "${YELLOW}New version available: $LATEST_VERSION${NC}"
         cp "$TEMP_SCRIPT" "$0"
         chmod +x "$0"
-        echo -e "${CHECKMARK} Update downloaded to version $LATEST_VERSION. Please re-run the script."
-        exit 0
+        if [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; then
+            RETRY_COUNT=$((RETRY_COUNT + 1))
+            echo -e "${CHECKMARK} Update downloaded to version $LATEST_VERSION. Restarting script... (Attempt $RETRY_COUNT of $MAX_RETRIES)"
+            exec "$0"
+        else
+            echo -e "${CROSS} Maximum retries reached. Exiting to prevent infinite loop."
+            exit 1
+        fi
     else
         echo -e "${GREEN}✔ No update needed. You are using the latest version.${NC}"
     fi
