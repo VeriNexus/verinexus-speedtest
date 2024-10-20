@@ -5,7 +5,7 @@
 # www.speedtest.net/result/
 
 # Version number of the script
-SCRIPT_VERSION="2.3.33"
+SCRIPT_VERSION="2.4"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -40,16 +40,26 @@ CROSS="${RED}✖${NC}"
 MAX_RETRIES=3
 RETRY_COUNT=0
 
+# Function to perform DNS resolution tests
+perform_dns_tests() {
+    local dns_server=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | head -n 1)
+    echo "Using DNS server: $dns_server"  # Debugging statement
 
-
-# Function to ensure the measurement exists with the correct field types
-#ensure_measurement_exists() {
-#    local db_name=$1
-#    local measurement=$2
-#    local test_data="endpoints,endpoint=example.com value=1i"
-#    curl -i -XPOST "$INFLUXDB_SERVER/write?db=$db_name" --data-binary "$test_data"
-#}
-
+    local domains=("example.com" "google.com" "github.com")
+    for domain in "${domains[@]}"; do
+        echo "Testing DNS resolution for: $domain"  # Debugging statement
+        local start_time=$(date +%s%N)
+        local dns_result=$(dig @$dns_server $domain +short)
+        local end_time=$(date +%s%N)
+        local dns_time=$((($end_time - $start_time) / 1000000))  # Convert to milliseconds
+        if [ -z "$dns_result" ]; then
+            dns_time="0"
+        fi
+        echo "DNS resolution time for $domain: $dns_time ms"
+        # Add the DNS resolution time to the InfluxDB data
+        INFLUXDB_DATA="$INFLUXDB_DATA,field_dns_${domain//./_}=$dns_time"
+    done
+}
 
 # Function to check dependencies
 check_dependencies() {
@@ -361,6 +371,13 @@ printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 6: Extracting Shareable ID" "S
 # Step 7: Saving Results to InfluxDB
 HOSTNAME=$(hostname)
 
+# Perform DNS resolution tests
+echo -e "${BLUE}${BOLD}Starting DNS Resolution Tests...${NC}"
+perform_dns_tests
+echo -e "${CHECKMARK} DNS Resolution Tests completed."
+
+# Corrected InfluxDB data preparation
+# INFLUXDB_DATA="speedtest,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$HOSTNAME,tag_location=$LOCATION field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\""
 # Corrected InfluxDB data preparation
 INFLUXDB_DATA="speedtest,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$HOSTNAME,tag_location=$LOCATION field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\""
 
