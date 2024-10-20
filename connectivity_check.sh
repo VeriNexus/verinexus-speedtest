@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="1.2"
+SCRIPT_VERSION="1.3"
 
 # GitHub repository raw URL for the script
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/connectivity_check.sh"
@@ -201,6 +201,13 @@ check_connectivity() {
         local status="down"
     fi
 
+    # Determine the numeric status code
+    if [ "$status" == "up" ]; then
+        status_code=1i
+    else
+        status_code=0i
+    fi
+
     # Update uptime/downtime
     local current_time=$(date +%s)
     local time_diff=$((current_time - LAST_CHECK_TIME))
@@ -228,7 +235,7 @@ check_connectivity() {
         fi
 
         # Prepare data for InfluxDB
-        local data="$INFLUXDB_MEASUREMENT,mac_address=$MAC_ADDRESS status=\"$status\" $((timestamp * 1000000000))"
+        local data="$INFLUXDB_MEASUREMENT,mac_address=$MAC_ADDRESS status=\"$status\",status_code=$status_code $((timestamp * 1000000000))"
 
         # Send data to InfluxDB
         curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$data"
@@ -244,7 +251,7 @@ check_connectivity() {
 # Function to send heartbeat
 send_heartbeat() {
     local timestamp=$(date +%s)
-    local data="$HEARTBEAT_MEASUREMENT,mac_address=$MAC_ADDRESS running=1 $((timestamp * 1000000000))"
+    local data="$HEARTBEAT_MEASUREMENT,mac_address=$MAC_ADDRESS running=1i $((timestamp * 1000000000))"
     curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$data"
 }
 
