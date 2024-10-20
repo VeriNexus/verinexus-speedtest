@@ -5,7 +5,7 @@
 # www.speedtest.net/result/
 
 # Version number of the script
-SCRIPT_VERSION="2.3.28"
+SCRIPT_VERSION="2.3.29"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -109,7 +109,7 @@ perform_ping_tests() {
 
     for endpoint in $endpoint_list; do
         echo "Testing endpoint: $endpoint"  # Debugging statement
-        local ping_command="ping -c 20 -s 1 $endpoint"
+        local ping_command="ping -c 1 -s 20 $endpoint"
         echo "Ping command: $ping_command"  # Debugging statement
         local ping_result=$($ping_command | grep 'time=' | awk -F'time=' '{print $2}' | awk '{print $1}')
         if ! [[ $ping_result =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
