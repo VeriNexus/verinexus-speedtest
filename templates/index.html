@@ -16,9 +16,9 @@
     <ul>
         {% for point in points %}
             <li>
-                {{ point['endpoint'] }}
+                {{ point['tag_endpoint'] }}
                 <form action="/delete" method="post" style="display:inline;">
-                    <input type="hidden" name="endpoint" value="{{ point['endpoint'] }}">
+                    <input type="hidden" name="endpoint" value="{{ point['tag_endpoint'] }}">
                     <button type="submit">Delete</button>
                 </form>
             </li>

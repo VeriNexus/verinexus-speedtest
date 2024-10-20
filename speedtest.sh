@@ -5,7 +5,7 @@
 # www.speedtest.net/result/
 
 # Version number of the script
-SCRIPT_VERSION="2.3.29"
+SCRIPT_VERSION="2.3.30"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -127,6 +127,9 @@ create_database_if_not_exists() {
     local databases=$(curl -s -G "$INFLUXDB_SERVER/query" --data-urlencode "q=SHOW DATABASES")
     if ! echo "$databases" | grep -q "\"$db_name\""; then
         curl -i -XPOST "$INFLUXDB_SERVER/query" --data-urlencode "q=CREATE DATABASE $db_name"
+        # Add example.com entry in the correct format
+        local test_data="endpoints,tag_endpoint=example.com field_value=1i"
+        curl -i -XPOST "$INFLUXDB_SERVER/write?db=$db_name" --data-binary "$test_data"
     fi
 }
 

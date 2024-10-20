@@ -15,25 +15,24 @@ def create_database_if_not_exists(db_name):
     databases = client.get_list_database()
     if not any(db['name'] == db_name for db in databases):
         client.create_database(db_name)
-
-def ensure_measurement_exists(db_name, measurement):
-    test_data = [
-        {
-            "measurement": measurement,
-            "tags": {
-                "endpoint": "example.com"
-            },
-            "fields": {
-                "value": 1
+        # Add example.com entry in the correct format
+        test_data = [
+            {
+                "measurement": INFLUXDB_MEASUREMENT,
+                "tags": {
+                    "tag_endpoint": "example.com"
+                },
+                "fields": {
+                    "field_value": 1
+                }
             }
-        }
-    ]
-    client.switch_database(db_name)
-    client.write_points(test_data)
+        ]
+        client.switch_database(db_name)
+        client.write_points(test_data)
 
 # Ensure the test_db exists and the measurement is correctly formatted
 create_database_if_not_exists(INFLUXDB_DB)
-ensure_measurement_exists(INFLUXDB_DB, INFLUXDB_MEASUREMENT)
+client.switch_database(INFLUXDB_DB)  # Switch to the correct database
 
 @app.route('/')
 def index():
@@ -49,10 +48,10 @@ def add_endpoint():
         {
             "measurement": INFLUXDB_MEASUREMENT,
             "tags": {
-                "endpoint": endpoint
+                "tag_endpoint": endpoint
             },
             "fields": {
-                "value": 1
+                "field_value": 1
             }
         }
     ]
@@ -62,7 +61,7 @@ def add_endpoint():
 @app.route('/delete', methods=['POST'])
 def delete_endpoint():
     endpoint = request.form['endpoint']
-    query = f"DELETE FROM {INFLUXDB_MEASUREMENT} WHERE \"endpoint\"='{endpoint}'"
+    query = f"DELETE FROM {INFLUXDB_MEASUREMENT} WHERE \"tag_endpoint\"='{endpoint}'"
     client.query(query)
     return redirect(url_for('index'))
 
