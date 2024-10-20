@@ -5,7 +5,7 @@
 # www.speedtest.net/result/
 
 # Version number of the script
-SCRIPT_VERSION="2.4"
+SCRIPT_VERSION="2.5.1"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -14,7 +14,8 @@ FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtes
 # Temporary files for comparison and forced error
 TEMP_SCRIPT="/tmp/latest_speedtest.sh"
 FORCED_ERROR_FILE="/tmp/force_error.txt"
-ERROR_LOG=""
+LOG_FILE="/var/log/verinexus_speedtest.log"
+[ -w "/var/log" ] || LOG_FILE="/tmp/verinexus_speedtest.log"
 MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
 
 # InfluxDB Configuration
@@ -30,6 +31,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[1;34m'
 CYAN='\033[1;36m'
+BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Symbols
@@ -43,19 +45,21 @@ RETRY_COUNT=0
 # Function to perform DNS resolution tests
 perform_dns_tests() {
     local dns_server=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | head -n 1)
-    echo "Using DNS server: $dns_server"  # Debugging statement
+    if [ -z "$dns_server" ]; then
+        log_error "No DNS server found in /etc/resolv.conf."
+        return
+    fi
 
     local domains=("example.com" "google.com" "github.com")
     for domain in "${domains[@]}"; do
-        echo "Testing DNS resolution for: $domain"  # Debugging statement
         local start_time=$(date +%s%N)
         local dns_result=$(dig @$dns_server $domain +short)
         local end_time=$(date +%s%N)
         local dns_time=$((($end_time - $start_time) / 1000000))  # Convert to milliseconds
         if [ -z "$dns_result" ]; then
             dns_time="0"
+            log_error "DNS resolution failed for $domain."
         fi
-        echo "DNS resolution time for $domain: $dns_time ms"
         # Add the DNS resolution time to the InfluxDB data
         INFLUXDB_DATA="$INFLUXDB_DATA,field_dns_${domain//./_}=$dns_time"
     done
@@ -64,23 +68,15 @@ perform_dns_tests() {
 # Function to check dependencies
 check_dependencies() {
     local missing_dependencies=false
+    local dependencies=("awk" "curl" "jq" "dig" "speedtest-cli" "ping")
 
-    # Check if 'awk' is installed
-    if ! command -v awk &> /dev/null; then
-        echo -e "${CROSS} ${RED}Error: awk is not installed.${NC}"
-        missing_dependencies=true
-    fi
-
-    # Check if 'curl' is installed (used for updates and network calls)
-    if ! command -v curl &> /dev/null; then
-        echo -e "${CROSS} ${RED}Error: curl is not installed.${NC}"
-        missing_dependencies=true
-    fi
-
-    if ! command -v jq &> /dev/null; then
-        echo -e "${CROSS} ${RED}Error: jq is not installed.${NC}"
-        missing_dependencies=true
-    fi
+    for dep in "${dependencies[@]}"; do
+        if ! command -v $dep &> /dev/null; then
+            echo -e "${CROSS} ${RED}Error: $dep is not installed.${NC}"
+            log_error "$dep is not installed."
+            missing_dependencies=true
+        fi
+    done
 
     if [ "$missing_dependencies" = true ]; then
         echo -e "${CROSS} ${RED}Please install the missing dependencies and rerun the script.${NC}"
@@ -94,44 +90,36 @@ check_dependencies
 # Function to log errors without stopping the script
 log_error() {
     local error_message="$1"
-    local timestamp_ms=$(($(date +%s%N)/1000000))  # Unix timestamp in milliseconds
     local timestamp="$(TZ='Europe/London' date +"%Y-%m-%d %H:%M:%S")"
-    local error_id="$timestamp_ms"
     local hostname="$(hostname)"
-    local private_ip="$(hostname -I | awk '{print $1}')"
-    local public_ip="$(curl -s ifconfig.co)"
     local script_version="$SCRIPT_VERSION"
-    local active_iface=$(ip route | grep default | awk '{print $5}')
-    local mac_address=$(cat /sys/class/net/$active_iface/address)  # Get MAC address
 
-    # Format the error log entry as a single line in CSV format, including the MAC address
-    local error_entry="$error_id,$timestamp,$script_version,$hostname,$private_ip,$public_ip,$mac_address,\"$error_message\""
+    # Format the error log entry
+    local error_entry="$timestamp [$hostname] [Version $script_version] ERROR: $error_message"
 
-    echo -e "${CROSS} ${RED}Error: $error_message${NC}"
+    # Write to log file
+    echo "$error_entry" >> "$LOG_FILE"
 }
 
 # Function to perform ping tests
 perform_ping_tests() {
     local endpoints=$(curl -s -G "$INFLUXDB_SERVER/query" --data-urlencode "db=$INFLUXDB_TEST_DB" --data-urlencode "q=SHOW TAG VALUES FROM \"$INFLUXDB_TEST_MEASUREMENT\" WITH KEY = \"tag_endpoint\"")
-    echo "InfluxDB response: $endpoints"  # Debugging statement
 
     local endpoint_list=$(echo "$endpoints" | jq -r '.results[0].series[0].values[][1] // empty' 2>/dev/null)
-    echo "Parsed endpoint list: $endpoint_list"  # Debugging statement
 
     if [ -z "$endpoint_list" ]; then
-        echo "No endpoints found in the test database."
+        echo -e "${YELLOW}No endpoints found in the test database.${NC}"
+        log_error "No endpoints found in the test database."
         return
     fi
 
     for endpoint in $endpoint_list; do
-        echo "Testing endpoint: $endpoint"  # Debugging statement
         local ping_command="ping -c 1 -s 20 $endpoint"
-        echo "Ping command: $ping_command"  # Debugging statement
         local ping_result=$($ping_command | grep 'time=' | awk -F'time=' '{print $2}' | awk '{print $1}')
         if ! [[ $ping_result =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
             ping_result="0"
+            log_error "Ping failed for $endpoint."
         fi
-        echo "Ping to $endpoint: $ping_result ms"
         # Add the ping result to the InfluxDB data
         INFLUXDB_DATA="$INFLUXDB_DATA,field_ping_${endpoint//./_}=$ping_result"
     done
@@ -142,10 +130,10 @@ create_database_if_not_exists() {
     local db_name=$1
     local databases=$(curl -s -G "$INFLUXDB_SERVER/query" --data-urlencode "q=SHOW DATABASES")
     if ! echo "$databases" | grep -q "\"$db_name\""; then
-        curl -i -XPOST "$INFLUXDB_SERVER/query" --data-urlencode "q=CREATE DATABASE $db_name"
+        curl -s -XPOST "$INFLUXDB_SERVER/query" --data-urlencode "q=CREATE DATABASE $db_name" >/dev/null 2>&1
         # Add example.com entry in the correct format
         local test_data="endpoints,tag_endpoint=example.com field_value=1i"
-        curl -i -XPOST "$INFLUXDB_SERVER/write?db=$db_name" --data-binary "$test_data"
+        curl -s -XPOST "$INFLUXDB_SERVER/write?db=$db_name" --data-binary "$test_data" >/dev/null 2>&1
     fi
 }
 
@@ -247,7 +235,7 @@ check_for_updates() {
             exit 1
         fi
     else
-        echo -e "${GREEN}✔ No update needed. You are using the latest version.${NC}"
+        echo -e "${GREEN}${CHECKMARK} No update needed. You are using the latest version.${NC}"
     fi
 
     echo -e "${CYAN}====================================================${NC}"
@@ -265,7 +253,7 @@ run_speed_test() {
             break
         else
             log_error "Speed Test failed on attempt $((attempts+1))."
-            attempts=$((attempts+1))
+            attempts=$((attempts + 1))
             sleep 5  # Wait before retrying
         fi
     done
@@ -291,30 +279,34 @@ echo -e "${YELLOW}Script Version: $SCRIPT_VERSION${NC}"
 
 # Fancy Progress Bar Function
 progress_bar() {
-    echo -n -e "["
-    for i in {1..50}; do
-        echo -n -e "${CYAN}#${NC}"
+    echo -ne "${CYAN}["
+    for ((i=0; i<=50; i++)); do
+        echo -ne "#"
         sleep 0.02
     done
-    echo -e "]"
+    echo -e "]${NC}"
 }
 
 echo -e "${BLUE}${BOLD}Starting VeriNexus Speed Test...${NC}"
 progress_bar
 
 # Step 1: Running Speed Test with retry logic
+echo -e "${CYAN}${BOLD}Step 1: Running Speed Test...${NC}"
 run_speed_test
 if [ $? -ne 0 ]; then
     log_error "Speed Test failed after maximum attempts."
     exit 1
 fi
+echo -e "${CHECKMARK}${GREEN} Speed Test completed successfully.${NC}"
 
 # Step 2: Fetching Date and Time (UK Time - GMT/BST)
+echo -ne "${CYAN}Step 2: Fetching Date and Time (UK Time)... "
 UK_DATE=$(TZ="Europe/London" date +"%Y-%m-%d")
 UK_TIME=$(TZ="Europe/London" date +"%H:%M:%S")
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 2: Fetching Date and Time (UK Time)" "Date (UK): $UK_DATE, Time (UK): $UK_TIME"
+echo -e "${CHECKMARK}${GREEN}Date (UK): $UK_DATE, Time (UK): $UK_TIME${NC}"
 
 # Step 3: Fetching Private/Public IPs
+echo -ne "${CYAN}Step 3: Fetching Private/Public IPs... "
 if [ "$FORCE_FAIL_PRIVATE_IP" = true ]; then
     log_error "Forced failure to fetch Private IP."
     PRIVATE_IP="N/A"
@@ -328,9 +320,10 @@ if [ "$FORCE_FAIL_PUBLIC_IP" = true ]; then
 else
     PUBLIC_IP=$(curl -s ifconfig.co)
 fi
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 3: Fetching Private/Public IPs" "Private IP: $PRIVATE_IP, Public IP: $PUBLIC_IP"
+echo -e "${CHECKMARK}${GREEN}Private IP: $PRIVATE_IP, Public IP: $PUBLIC_IP${NC}"
 
 # Step 4: Fetching MAC Address and LAN IP
+echo -ne "${CYAN}Step 4: Fetching MAC Address and LAN IP... "
 ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
 if [ "$FORCE_FAIL_MAC" = true ]; then
     log_error "Forced failure to fetch MAC Address."
@@ -338,13 +331,15 @@ if [ "$FORCE_FAIL_MAC" = true ]; then
 elif [ -n "$ACTIVE_IFACE" ]; then
     MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
     LAN_IP=$(ip addr show $ACTIVE_IFACE | grep "inet " | awk '{print $2}' | cut -d/ -f1)
-    printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 4: Fetching LAN IP" "LAN IP: $LAN_IP"
 else
     log_error "Could not determine active network interface."
+    MAC_ADDRESS="N/A"
     LAN_IP="N/A"
 fi
+echo -e "${CHECKMARK}${GREEN}MAC Address: $MAC_ADDRESS, LAN IP: $LAN_IP${NC}"
 
 # Step 5: Extracting the relevant fields
+echo -ne "${CYAN}Step 5: Extracting Speed Test Results... "
 SERVER_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
 SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}' | sed 's/\"//g') # Remove quotes
 LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}' | sed 's/\"//g')    # Remove quotes
@@ -360,39 +355,35 @@ if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" || -z "$LATENCY" || -z "$PUBLIC
     LATENCY="0.00"
     PUBLIC_IP="N/A"
 fi
-
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 5: Converting Speed Results" "Download Speed: $DOWNLOAD_SPEED Mbps, Upload Speed: $UPLOAD_SPEED Mbps, Latency: $LATENCY ms"
+echo -e "${CHECKMARK}${GREEN}Download: $DOWNLOAD_SPEED Mbps, Upload: $UPLOAD_SPEED Mbps, Latency: $LATENCY ms${NC}"
 
 # Step 6: Extracting Shareable ID
+echo -ne "${CYAN}Step 6: Extracting Shareable ID... "
 SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
 SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
-printf "${CYAN}%-50s ${CHECKMARK}%s${NC}\n" "Step 6: Extracting Shareable ID" "Shareable ID: $SHARE_ID"
+echo -e "${CHECKMARK}${GREEN}Shareable ID: $SHARE_ID${NC}"
 
-# Step 7: Saving Results to InfluxDB
-HOSTNAME=$(hostname)
+# Prepare InfluxDB data before calling DNS and ping tests
+INFLUXDB_DATA="speedtest,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$(hostname),tag_location=$LOCATION field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\""
 
-# Perform DNS resolution tests
-echo -e "${BLUE}${BOLD}Starting DNS Resolution Tests...${NC}"
+# Step 7: Performing DNS Resolution Tests
+echo -e "${CYAN}Step 7: Performing DNS Resolution Tests...${NC}"
 perform_dns_tests
-echo -e "${CHECKMARK} DNS Resolution Tests completed."
+echo -e "${CHECKMARK}${GREEN} DNS Resolution Tests completed.${NC}"
 
-# Corrected InfluxDB data preparation
-# INFLUXDB_DATA="speedtest,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$HOSTNAME,tag_location=$LOCATION field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\""
-# Corrected InfluxDB data preparation
-INFLUXDB_DATA="speedtest,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$HOSTNAME,tag_location=$LOCATION field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\""
+# Step 8: Performing Ping Tests
+echo -e "${CYAN}Step 8: Performing Ping Tests...${NC}"
+perform_ping_tests
+echo -e "${CHECKMARK}${GREEN} Ping Tests completed.${NC}"
 
 # Ensure the databases exist
 create_database_if_not_exists "$INFLUXDB_DB"
 create_database_if_not_exists "$INFLUXDB_TEST_DB"
 
-# Ensure the measurement exists with the correct field types
-# ensure_measurement_exists "$INFLUXDB_TEST_DB" "$INFLUXDB_TEST_MEASUREMENT"
-
-# Perform ping tests
-perform_ping_tests
-
-# Sending data to InfluxDB.
-curl -i -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$INFLUXDB_DATA"
+# Step 9: Sending data to InfluxDB
+echo -ne "${CYAN}Step 9: Saving Results to InfluxDB... "
+curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$INFLUXDB_DATA"
+echo -e "${CHECKMARK}${GREEN}Data successfully saved to InfluxDB.${NC}"
 
 # Footer
 echo -e "${CYAN}====================================================${NC}"
