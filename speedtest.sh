@@ -5,7 +5,7 @@
 # www.speedtest.net/result/
 
 # Version number of the script
-SCRIPT_VERSION="2.3.26"
+SCRIPT_VERSION="2.3.27"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -108,13 +108,16 @@ perform_ping_tests() {
     fi
 
     for endpoint in $endpoint_list; do
-        local ping_result=$(ping -c 1 -s 1 "$endpoint" | grep 'time=' | awk -F'time=' '{print $2}' | awk '{print $1}')
-        if [ -z "$ping_result" ]; then
-            ping_result="N/A"
+        echo "Testing endpoint: $endpoint"  # Debugging statement
+        local ping_command="ping -c 1 -s 1 $endpoint"
+        echo "Ping command: $ping_command"  # Debugging statement
+        local ping_result=$($ping_command | grep 'time=' | awk -F'time=' '{print $2}' | awk '{print $1}')
+        if ! [[ $ping_result =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+            ping_result="0"
         fi
         echo "Ping to $endpoint: $ping_result ms"
         # Add the ping result to the InfluxDB data
-        INFLUXDB_DATA="$INFLUXDB_DATA,field_ping_$endpoint=$ping_result"
+        INFLUXDB_DATA="$INFLUXDB_DATA,field_ping_${endpoint//./_}=$ping_result"
     done
 }
 
