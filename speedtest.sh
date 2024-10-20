@@ -5,7 +5,7 @@
 # www.speedtest.net/result/
 
 # Version number of the script
-SCRIPT_VERSION="2.3.23"
+SCRIPT_VERSION="2.3.24"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -96,10 +96,10 @@ log_error() {
 
 # Function to perform ping tests
 perform_ping_tests() {
-    local endpoints=$(curl -s -G "$INFLUXDB_SERVER/query" --data-urlencode "db=$INFLUXDB_TEST_DB" --data-urlencode "q=SELECT endpoint FROM $INFLUXDB_TEST_MEASUREMENT")
+    local endpoints=$(curl -s -G "$INFLUXDB_SERVER/query" --data-urlencode "db=$INFLUXDB_TEST_DB" --data-urlencode "q=SELECT \"endpoint\" FROM \"$INFLUXDB_TEST_MEASUREMENT\"")
     echo "InfluxDB response: $endpoints"  # Debugging statement
 
-    local endpoint_list=$(echo "$endpoints" | jq -r '.results[0].series[0].values[][1] // empty' 2>/dev/null)
+    local endpoint_list=$(echo "$endpoints" | jq -r '.results[0].series[0].values[][0] // empty' 2>/dev/null)
     echo "Parsed endpoint list: $endpoint_list"  # Debugging statement
 
     if [ -z "$endpoint_list" ]; then
