@@ -1,11 +1,7 @@
 #!/bin/bash
 
-# URL to view result on speedtest.net
-# To view a result on speedtest.net, use this URL followed by the field_share_id:
-# www.speedtest.net/result/
-
 # Version number of the script
-SCRIPT_VERSION="2.5.1"
+SCRIPT_VERSION="2.6"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
@@ -16,7 +12,7 @@ TEMP_SCRIPT="/tmp/latest_speedtest.sh"
 FORCED_ERROR_FILE="/tmp/force_error.txt"
 LOG_FILE="/var/log/verinexus_speedtest.log"
 [ -w "/var/log" ] || LOG_FILE="/tmp/verinexus_speedtest.log"
-MAX_ERROR_LOG_SIZE=2048  # 2KB for testing
+MAX_LOG_SIZE=5242880  # 5MB
 
 # InfluxDB Configuration
 INFLUXDB_SERVER="http://82.165.7.116:8086"
@@ -42,11 +38,40 @@ CROSS="${RED}✖${NC}"
 MAX_RETRIES=3
 RETRY_COUNT=0
 
+# Logging levels
+LOG_LEVELS=("INFO" "WARN" "ERROR")
+
+# Function to rotate log file
+rotate_log_file() {
+    if [ -f "$LOG_FILE" ] && [ "$(stat -c%s "$LOG_FILE")" -ge "$MAX_LOG_SIZE" ]; then
+        mv "$LOG_FILE" "${LOG_FILE}_$(date '+%Y%m%d%H%M%S')"
+        touch "$LOG_FILE"
+    fi
+}
+
+# Function to log messages with levels
+log_message() {
+    local level="$1"
+    local message="$2"
+    local timestamp="$(date +"%Y-%m-%d %H:%M:%S")"
+    local hostname="$(hostname)"
+    local script_version="$SCRIPT_VERSION"
+
+    if [[ " ${LOG_LEVELS[*]} " == *" $level "* ]]; then
+        echo "$timestamp [$hostname] [Version $script_version] [$level]: $message" >> "$LOG_FILE"
+    else
+        echo "$timestamp [$hostname] [Version $script_version] [UNKNOWN]: $message" >> "$LOG_FILE"
+    fi
+}
+
+# Rotate log file at the start
+rotate_log_file
+
 # Function to perform DNS resolution tests
 perform_dns_tests() {
     local dns_server=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | head -n 1)
     if [ -z "$dns_server" ]; then
-        log_error "No DNS server found in /etc/resolv.conf."
+        log_message "ERROR" "No DNS server found in /etc/resolv.conf."
         return
     fi
 
@@ -58,7 +83,7 @@ perform_dns_tests() {
         local dns_time=$((($end_time - $start_time) / 1000000))  # Convert to milliseconds
         if [ -z "$dns_result" ]; then
             dns_time="0"
-            log_error "DNS resolution failed for $domain."
+            log_message "WARN" "DNS resolution failed for $domain."
         fi
         # Add the DNS resolution time to the InfluxDB data
         INFLUXDB_DATA="$INFLUXDB_DATA,field_dns_${domain//./_}=$dns_time"
@@ -73,7 +98,7 @@ check_dependencies() {
     for dep in "${dependencies[@]}"; do
         if ! command -v $dep &> /dev/null; then
             echo -e "${CROSS} ${RED}Error: $dep is not installed.${NC}"
-            log_error "$dep is not installed."
+            log_message "ERROR" "$dep is not installed."
             missing_dependencies=true
         fi
     done
@@ -87,20 +112,6 @@ check_dependencies() {
 # Call the check_dependencies function early in the script
 check_dependencies
 
-# Function to log errors without stopping the script
-log_error() {
-    local error_message="$1"
-    local timestamp="$(TZ='Europe/London' date +"%Y-%m-%d %H:%M:%S")"
-    local hostname="$(hostname)"
-    local script_version="$SCRIPT_VERSION"
-
-    # Format the error log entry
-    local error_entry="$timestamp [$hostname] [Version $script_version] ERROR: $error_message"
-
-    # Write to log file
-    echo "$error_entry" >> "$LOG_FILE"
-}
-
 # Function to perform ping tests
 perform_ping_tests() {
     local endpoints=$(curl -s -G "$INFLUXDB_SERVER/query" --data-urlencode "db=$INFLUXDB_TEST_DB" --data-urlencode "q=SHOW TAG VALUES FROM \"$INFLUXDB_TEST_MEASUREMENT\" WITH KEY = \"tag_endpoint\"")
@@ -109,7 +120,7 @@ perform_ping_tests() {
 
     if [ -z "$endpoint_list" ]; then
         echo -e "${YELLOW}No endpoints found in the test database.${NC}"
-        log_error "No endpoints found in the test database."
+        log_message "WARN" "No endpoints found in the test database."
         return
     fi
 
@@ -118,7 +129,7 @@ perform_ping_tests() {
         local ping_result=$($ping_command | grep 'time=' | awk -F'time=' '{print $2}' | awk '{print $1}')
         if ! [[ $ping_result =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
             ping_result="0"
-            log_error "Ping failed for $endpoint."
+            log_message "WARN" "Ping failed for $endpoint."
         fi
         # Add the ping result to the InfluxDB data
         INFLUXDB_DATA="$INFLUXDB_DATA,field_ping_${endpoint//./_}=$ping_result"
@@ -131,6 +142,7 @@ create_database_if_not_exists() {
     local databases=$(curl -s -G "$INFLUXDB_SERVER/query" --data-urlencode "q=SHOW DATABASES")
     if ! echo "$databases" | grep -q "\"$db_name\""; then
         curl -s -XPOST "$INFLUXDB_SERVER/query" --data-urlencode "q=CREATE DATABASE $db_name" >/dev/null 2>&1
+        log_message "INFO" "Created InfluxDB database: $db_name"
         # Add example.com entry in the correct format
         local test_data="endpoints,tag_endpoint=example.com field_value=1i"
         curl -s -XPOST "$INFLUXDB_SERVER/write?db=$db_name" --data-binary "$test_data" >/dev/null 2>&1
@@ -146,10 +158,11 @@ apply_forced_errors() {
 
     if [ -s "$FORCED_ERROR_FILE" ]; then
         echo -e "${RED}Forced error file found. Applying forced errors...${NC}"
+        log_message "INFO" "Applying forced errors from $FORCED_ERROR_FILE"
         if bash -n "$FORCED_ERROR_FILE"; then
             . "$FORCED_ERROR_FILE"
         else
-            log_error "Forced error file contains invalid syntax. Deleting local copy."
+            log_message "ERROR" "Forced error file contains invalid syntax. Deleting local copy."
             rm -f "$FORCED_ERROR_FILE"
         fi
     else
@@ -157,6 +170,7 @@ apply_forced_errors() {
         if [ -f "$FORCED_ERROR_FILE" ]; then
             echo -e "${YELLOW}Forced error file removed from GitHub. Deleting local copy...${NC}"
             rm -f "$FORCED_ERROR_FILE"
+            log_message "INFO" "Deleted local copy of forced error file."
         fi
     fi
 }
@@ -199,7 +213,7 @@ check_for_updates() {
         if [ $? -eq 0 ]; then
             break
         else
-            log_error "Failed to download the script from GitHub. Retrying...($attempt)"
+            log_message "WARN" "Failed to download the script from GitHub. Retrying...($attempt)"
         fi
         attempt=$((attempt + 1))
         sleep 5
@@ -207,14 +221,14 @@ check_for_updates() {
 
     # Ensure the downloaded file is valid
     if [ ! -s "$TEMP_SCRIPT" ]; then
-        log_error "Downloaded script is empty."
+        log_message "ERROR" "Downloaded script is empty."
         return 1
     fi
 
     # Extract version from the downloaded script
     LATEST_VERSION=$(grep -oP 'SCRIPT_VERSION="\K[0-9.]+' "$TEMP_SCRIPT")
     if [ -z "$LATEST_VERSION" ]; then
-        log_error "Failed to extract version from the downloaded script."
+        log_message "ERROR" "Failed to extract version from the downloaded script."
         return 1
     fi
 
@@ -226,6 +240,7 @@ check_for_updates() {
         echo -e "${YELLOW}New version available: $LATEST_VERSION${NC}"
         cp "$TEMP_SCRIPT" "$0"
         chmod +x "$0"
+        log_message "INFO" "Updated script to version $LATEST_VERSION."
         if [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; then
             RETRY_COUNT=$((RETRY_COUNT + 1))
             echo -e "${CHECKMARK} Update downloaded to version $LATEST_VERSION. Restarting script... (Attempt $RETRY_COUNT of $MAX_RETRIES)"
@@ -250,15 +265,17 @@ run_speed_test() {
         SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
         if [ $? -eq 0 ]; then
             echo -e "${CHECKMARK} Speed Test completed successfully."
+            log_message "INFO" "Speed Test completed successfully."
             break
         else
-            log_error "Speed Test failed on attempt $((attempts+1))."
+            log_message "WARN" "Speed Test failed on attempt $((attempts+1))."
             attempts=$((attempts + 1))
             sleep 5  # Wait before retrying
         fi
     done
 
     if [ $attempts -eq $max_attempts ]; then
+        log_message "ERROR" "Speed Test failed after $max_attempts attempts."
         return 1  # Fail if all attempts failed
     fi
     return 0
@@ -294,7 +311,7 @@ progress_bar
 echo -e "${CYAN}${BOLD}Step 1: Running Speed Test...${NC}"
 run_speed_test
 if [ $? -ne 0 ]; then
-    log_error "Speed Test failed after maximum attempts."
+    echo -e "${CROSS}${RED} Speed Test failed after maximum attempts.${NC}"
     exit 1
 fi
 echo -e "${CHECKMARK}${GREEN} Speed Test completed successfully.${NC}"
@@ -308,14 +325,14 @@ echo -e "${CHECKMARK}${GREEN}Date (UK): $UK_DATE, Time (UK): $UK_TIME${NC}"
 # Step 3: Fetching Private/Public IPs
 echo -ne "${CYAN}Step 3: Fetching Private/Public IPs... "
 if [ "$FORCE_FAIL_PRIVATE_IP" = true ]; then
-    log_error "Forced failure to fetch Private IP."
+    log_message "WARN" "Forced failure to fetch Private IP."
     PRIVATE_IP="N/A"
 else
     PRIVATE_IP=$(hostname -I | awk '{print $1}')
 fi
 
 if [ "$FORCE_FAIL_PUBLIC_IP" = true ]; then
-    log_error "Forced failure to fetch Public IP."
+    log_message "WARN" "Forced failure to fetch Public IP."
     PUBLIC_IP="N/A"
 else
     PUBLIC_IP=$(curl -s ifconfig.co)
@@ -326,13 +343,13 @@ echo -e "${CHECKMARK}${GREEN}Private IP: $PRIVATE_IP, Public IP: $PUBLIC_IP${NC}
 echo -ne "${CYAN}Step 4: Fetching MAC Address and LAN IP... "
 ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
 if [ "$FORCE_FAIL_MAC" = true ]; then
-    log_error "Forced failure to fetch MAC Address."
+    log_message "WARN" "Forced failure to fetch MAC Address."
     MAC_ADDRESS="N/A"
 elif [ -n "$ACTIVE_IFACE" ]; then
     MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
     LAN_IP=$(ip addr show $ACTIVE_IFACE | grep "inet " | awk '{print $2}' | cut -d/ -f1)
 else
-    log_error "Could not determine active network interface."
+    log_message "ERROR" "Could not determine active network interface."
     MAC_ADDRESS="N/A"
     LAN_IP="N/A"
 fi
@@ -349,7 +366,7 @@ UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $8 / 1000000}
 PUBLIC_IP=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $10}')
 
 if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" || -z "$LATENCY" || -z "$PUBLIC_IP" ]]; then
-    log_error "Speed Test did not return valid data."
+    log_message "ERROR" "Speed Test did not return valid data."
     DOWNLOAD_SPEED="0.00"
     UPLOAD_SPEED="0.00"
     LATENCY="0.00"
@@ -384,6 +401,7 @@ create_database_if_not_exists "$INFLUXDB_TEST_DB"
 echo -ne "${CYAN}Step 9: Saving Results to InfluxDB... "
 curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$INFLUXDB_DATA"
 echo -e "${CHECKMARK}${GREEN}Data successfully saved to InfluxDB.${NC}"
+log_message "INFO" "Data saved to InfluxDB database $INFLUXDB_DB."
 
 # Footer
 echo -e "${CYAN}====================================================${NC}"
