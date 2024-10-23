@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.6.7"
+SCRIPT_VERSION="2.6.8"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -24,7 +24,7 @@ if [ "$SCRIPT_DIR" != "$BASE_DIR" ]; then
                 exit 1
             }
         }
-    fi  # <-- Moved 'fi' here, outside the command group
+    fi  # Corrected placement of 'fi'
 
     # Copy the script to $BASE_DIR
     echo "Copying script to $BASE_DIR..."
@@ -144,7 +144,7 @@ check_and_install_dependencies() {
             echo -e "${CROSS} ${RED}Please install the missing dependencies and rerun the script.${NC}"
             exit 1
         fi
-    fi
+    fi  # Corrected: Added missing 'fi' here
 }
 
 # Function to install dependencies
@@ -260,7 +260,7 @@ apply_forced_errors() {
             rm -f "$FORCED_ERROR_FILE"
             log_message "INFO" "Deleted local copy of forced error file."
         fi
-    }
+    fi
 }
 
 # Function to compare versions using awk
