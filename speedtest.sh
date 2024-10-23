@@ -1,7 +1,14 @@
 #!/bin/bash
+# File: speedtest.sh
+# Version: 2.7.3
+# Date: 23/10/2024
+
+# Description:
+# This script performs a speed test and collects various network metrics.
+# It uploads the results to an InfluxDB server for monitoring.
 
 # Version number of the script
-SCRIPT_VERSION="2.7.2"
+SCRIPT_VERSION="2.7.3"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -159,7 +166,7 @@ perform_dns_tests() {
         fi
         # Add the DNS resolution time to the InfluxDB data
         INFLUXDB_DATA="$INFLUXDB_DATA,field_dns_${domain//./_}=$dns_time"
-    }
+    done
 }
 
 # Function to perform ping tests
@@ -225,7 +232,7 @@ apply_forced_errors() {
             rm -f "$FORCED_ERROR_FILE"
             log_message "INFO" "Deleted local copy of forced error file."
         fi
-    }
+    fi
 }
 
 # Function to update crontab by downloading and running update_crontab.sh

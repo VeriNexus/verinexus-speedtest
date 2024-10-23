@@ -1,7 +1,13 @@
 #!/bin/bash
+# File: speedtest_wrapper.sh
+# Version: 1.2.0
+# Date: 23/10/2024
+
+# Description:
+# This wrapper script ensures that the main speedtest script is up to date and executes it.
 
 # Version number of the wrapper script
-WRAPPER_VERSION="1.1.0"
+WRAPPER_VERSION="1.2.0"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"

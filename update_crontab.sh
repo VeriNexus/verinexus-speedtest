@@ -1,4 +1,10 @@
 #!/bin/bash
+# File: update_crontab.sh
+# Version: 1.1.0
+# Date: 23/10/2024
+
+# Description:
+# This script updates the crontab to include the scheduled execution of the speedtest wrapper script.
 
 # Version number of the script
 SCRIPT_VERSION="1.1.0"
