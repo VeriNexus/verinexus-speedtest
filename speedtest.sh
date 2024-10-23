@@ -1,20 +1,32 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.6.1.2"
+SCRIPT_VERSION="2.6.5"
 
-# GitHub repository raw URLs for the script and forced error file
+# Base directory for all operations
+BASE_DIR="/VeriNexus"
+
+# Ensure base directory exists
+if [ ! -d "$BASE_DIR" ]; then
+    mkdir -p "$BASE_DIR"
+fi
+
+# Check if we have write permission to the base directory
+if [ ! -w "$BASE_DIR" ]; then
+    echo "Warning: No write permission to $BASE_DIR. Using /tmp/ instead."
+    BASE_DIR="/tmp"
+fi
+
+# GitHub repository raw URLs
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
 FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
 UPDATE_CRON_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/update_crontab.sh"
 
-
 # Temporary files for comparison and forced error
-TEMP_SCRIPT="/tmp/latest_speedtest.sh"
-FORCED_ERROR_FILE="/tmp/force_error.txt"
-UPDATE_CRON_SCRIPT="/tmp/update_crontab.sh"
-LOG_FILE="/var/log/verinexus_speedtest.log"
-[ -w "/var/log" ] || LOG_FILE="/tmp/verinexus_speedtest.log"
+TEMP_SCRIPT="$BASE_DIR/latest_speedtest.sh"
+FORCED_ERROR_FILE="$BASE_DIR/force_error.txt"
+UPDATE_CRON_SCRIPT="$BASE_DIR/update_crontab.sh"
+LOG_FILE="$BASE_DIR/verinexus_speedtest.log"
 MAX_LOG_SIZE=5242880  # 5MB
 
 # InfluxDB Configuration
@@ -93,27 +105,64 @@ perform_dns_tests() {
     done
 }
 
-# Function to check dependencies
-check_dependencies() {
-    local missing_dependencies=false
-    local dependencies=("awk" "curl" "jq" "dig" "speedtest-cli" "ping" "sudo")
+# Function to check and install dependencies
+check_and_install_dependencies() {
+    local missing_dependencies=()
+    local dependencies=("awk" "curl" "jq" "dig" "speedtest-cli" "ping" "ip" "tput" "grep" "sed" "hostname" "date" "sleep" "sudo")
 
     for dep in "${dependencies[@]}"; do
         if ! command -v $dep &> /dev/null; then
-            echo -e "${CROSS} ${RED}Error: $dep is not installed.${NC}"
-            log_message "ERROR" "$dep is not installed."
-            missing_dependencies=true
+            missing_dependencies+=("$dep")
         fi
     done
 
-    if [ "$missing_dependencies" = true ]; then
-        echo -e "${CROSS} ${RED}Please install the missing dependencies and rerun the script.${NC}"
-        exit 1
+    if [ ${#missing_dependencies[@]} -gt 0 ]; then
+        echo -e "${CROSS} ${RED}Error: The following dependencies are missing:${NC}"
+        for dep in "${missing_dependencies[@]}"; do
+            echo -e "   - $dep"
+            log_message "ERROR" "$dep is not installed."
+        done
+
+        # Prompt user to install missing dependencies
+        read -p "Do you want to install the missing dependencies now? (y/n): " choice
+        if [[ "$choice" =~ ^[Yy]$ ]]; then
+            install_dependencies "${missing_dependencies[@]}"
+        else
+            echo -e "${CROSS} ${RED}Please install the missing dependencies and rerun the script.${NC}"
+            exit 1
+        fi
     fi
 }
 
-# Call the check_dependencies function early in the script
-check_dependencies
+# Function to install dependencies
+install_dependencies() {
+    local dependencies=("$@")
+    echo -e "${BLUE}Installing missing dependencies...${NC}"
+    sudo apt-get update
+    for dep in "${dependencies[@]}"; do
+        case "$dep" in
+            "dig")
+                sudo apt-get install -y dnsutils
+                ;;
+            "ip")
+                sudo apt-get install -y iproute2
+                ;;
+            "speedtest-cli")
+                sudo apt-get install -y speedtest-cli
+                ;;
+            "ping")
+                sudo apt-get install -y iputils-ping
+                ;;
+            *)
+                sudo apt-get install -y "$dep"
+                ;;
+        esac
+    done
+    echo -e "${CHECKMARK} ${GREEN}Dependencies installed.${NC}"
+}
+
+# Call the check_and_install_dependencies function early in the script
+check_and_install_dependencies
 
 # Function to perform ping tests
 perform_ping_tests() {
@@ -259,31 +308,6 @@ check_for_updates() {
     echo -e "${CYAN}====================================================${NC}"
 }
 
-# Retry function to retry the speed test in case of failure
-run_speed_test() {
-    local attempts=0
-    local max_attempts=3
-    while [ $attempts -lt $max_attempts ]; do
-        echo -e "${BLUE}Attempting speed test (Attempt $((attempts+1)) of $max_attempts)...${NC}"
-        SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
-        if [ $? -eq 0 ]; then
-            echo -e "${CHECKMARK} Speed Test completed successfully."
-            log_message "INFO" "Speed Test completed successfully."
-            break
-        else
-            log_message "WARN" "Speed Test failed on attempt $((attempts+1))."
-            attempts=$((attempts + 1))
-            sleep 5  # Wait before retrying
-        fi
-    done
-
-    if [ $attempts -eq $max_attempts ]; then
-        log_message "ERROR" "Speed Test failed after $max_attempts attempts."
-        return 1  # Fail if all attempts failed
-    fi
-    return 0
-}
-
 # Function to update crontab by downloading and running update_crontab.sh
 update_crontab() {
     echo -e "${CYAN}====================================================${NC}"
@@ -313,6 +337,31 @@ update_crontab() {
     echo -e "${CYAN}====================================================${NC}"
 }
 
+# Retry function to retry the speed test in case of failure
+run_speed_test() {
+    local attempts=0
+    local max_attempts=3
+    while [ $attempts -lt $max_attempts ]; do
+        echo -e "${BLUE}Attempting speed test (Attempt $((attempts+1)) of $max_attempts)...${NC}"
+        SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
+        if [ $? -eq 0 ]; then
+            echo -e "${CHECKMARK} Speed Test completed successfully."
+            log_message "INFO" "Speed Test completed successfully."
+            break
+        else
+            log_message "WARN" "Speed Test failed on attempt $((attempts+1))."
+            attempts=$((attempts + 1))
+            sleep 5  # Wait before retrying
+        fi
+    done
+
+    if [ $attempts -eq $max_attempts ]; then
+        log_message "ERROR" "Speed Test failed after $max_attempts attempts."
+        return 1  # Fail if all attempts failed
+    fi
+    return 0
+}
+
 # Apply any forced errors
 apply_forced_errors
 
@@ -321,7 +370,6 @@ check_for_updates
 
 # Update crontab by downloading and running update_crontab.sh
 update_crontab || log_message "WARN" "update_crontab.sh encountered an error but script will continue."
-
 
 # Display Title with a Frame
 echo -e "${CYAN}====================================================${NC}"
