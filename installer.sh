@@ -1,7 +1,7 @@
 #!/bin/bash
 # File: installer.sh
 # Version: 1.1.0
-# Date: [Today's Date]
+# Date: 23/10/2024
 
 # Description:
 # This installer script sets up the VeriNexus Speed Test environment on a new machine.
