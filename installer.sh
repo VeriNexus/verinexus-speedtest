@@ -1,7 +1,7 @@
 #!/bin/bash
 # File: installer.sh
-# Version: 1.3.0
-# Date: [Today's Date]
+# Version: 1.4.0
+# Date: 23/10/2024
 
 # Description:
 # This installer script sets up the VeriNexus Speed Test environment on a new machine.
@@ -9,7 +9,7 @@
 # It includes handling for package manager locks by waiting until the lock is released.
 
 # Version number of the installer script
-INSTALLER_VERSION="1.3.0"
+INSTALLER_VERSION="1.4.0"
 
 # Base directory for the script
 BASE_DIR="/VeriNexus"
@@ -60,12 +60,11 @@ install_dependencies() {
         "speedtest-cli"
         "iputils-ping"
         "iproute2"       # Provides ip command
-        "tput"           # Provided by ncurses-bin
+        "ncurses-bin"    # Provides tput
         "grep"
         "sed"
         "hostname"
-        "date"
-        "coreutils"      # Provides sleep and other core utilities
+        "coreutils"      # Provides date, sleep, and other core utilities
     )
 
     for dep in "${dependencies[@]}"; do
