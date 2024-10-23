@@ -1,60 +1,95 @@
 #!/bin/bash
+# File: installer.sh
+# Version: 1.1.0
+# Date: [Today's Date]
 
-# VeriNexus Installer Script
-# Version: 1.0.1
-# Author: VeriNexus
-# Copyright (c) 2024 VeriNexus. All rights reserved.
+# Description:
+# This installer script sets up the VeriNexus Speed Test environment on a new machine.
+# It installs necessary dependencies, downloads required scripts, and sets up the crontab.
+
+# Version number of the installer script
+INSTALLER_VERSION="1.1.0"
 
 # Base directory for the script
 BASE_DIR="/VeriNexus"
 
+# URLs to download scripts
+SPEEDTEST_SCRIPT_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
+WRAPPER_SCRIPT_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest_wrapper.sh"
+UPDATE_CRONTAB_SCRIPT_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/update_crontab.sh"
+
+# Paths to scripts
+SPEEDTEST_SCRIPT_PATH="$BASE_DIR/speedtest.sh"
+WRAPPER_SCRIPT_PATH="$BASE_DIR/speedtest_wrapper.sh"
+UPDATE_CRONTAB_SCRIPT_PATH="$BASE_DIR/update_crontab.sh"
+
+# ANSI Color Codes
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[1;34m'
+CYAN='\033[1;36m'
+BOLD='\033[1m'
+NC='\033[0m' # No Color
+
+# Symbols
+CHECKMARK="${GREEN}✔${NC}"
+CROSS="${RED}✖${NC}"
+
 # Function to print error messages
 print_error() {
-    echo "Error: $1"
+    echo -e "${CROSS} ${RED}Error: $1${NC}"
     exit 1
 }
 
+# Function to install dependencies
+install_dependencies() {
+    echo -e "${BLUE}Installing necessary dependencies...${NC}"
+    sudo apt-get update || print_error "Failed to update package list"
+
+    dependencies=("awk" "curl" "jq" "dnsutils" "speedtest-cli" "iputils-ping" "iproute2" "tput" "grep" "sed" "hostname" "date" "coreutils")
+    for dep in "${dependencies[@]}"; do
+        echo -e "${BLUE}Installing $dep...${NC}"
+        sudo apt-get install -y "$dep" || print_error "Failed to install $dep"
+    done
+    echo -e "${CHECKMARK}${GREEN} All dependencies installed.${NC}"
+}
+
 # Ensure the base directory exists
+echo -e "${BLUE}Ensuring base directory exists...${NC}"
 if [ ! -d "$BASE_DIR" ]; then
     mkdir -p "$BASE_DIR" || print_error "Failed to create directory $BASE_DIR"
+    echo -e "${CHECKMARK}${GREEN} Base directory created at $BASE_DIR${NC}"
+else
+    echo -e "${CHECKMARK}${GREEN} Base directory already exists at $BASE_DIR${NC}"
 fi
 
 # Change to the base directory
 cd "$BASE_DIR" || print_error "Failed to change directory to $BASE_DIR"
 
-# Update package list
-echo "Updating package list..."
-sudo apt update || print_error "Failed to update package list"
+# Install dependencies
+install_dependencies
 
-# Install openssh-server
-# echo "Installing openssh-server..."
-# sudo apt install -y openssh-server || print_error "Failed to install openssh-server"
-
-# Enable and start the SSH service
-# echo "Enabling and starting SSH service..."
-# sudo systemctl enable ssh || print_error "Failed to enable SSH service"
-# sudo systemctl start ssh || print_error "Failed to start SSH service"
-
-# Allow SSH through the firewall
-# echo "Allowing SSH through the firewall..."
-# sudo ufw allow ssh || print_error "Failed to allow SSH through the firewall"
-
-# Check the status of the SSH service
-echo "Checking the status of the SSH service..."
-sudo systemctl status ssh || print_error "Failed to check the status of the SSH service"
-
-# GitHub repository raw URL for the script
-REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
-
-# Destination path for the downloaded script
-DEST_SCRIPT="$BASE_DIR/speedtest.sh"
+# Download the latest version of speedtest_wrapper.sh
+echo -e "${BLUE}Downloading speedtest_wrapper.sh...${NC}"
+curl -s -o "$WRAPPER_SCRIPT_PATH" "$WRAPPER_SCRIPT_URL" || print_error "Failed to download speedtest_wrapper.sh"
+chmod +x "$WRAPPER_SCRIPT_PATH" || print_error "Failed to make speedtest_wrapper.sh executable"
+echo -e "${CHECKMARK}${GREEN} speedtest_wrapper.sh downloaded and made executable.${NC}"
 
 # Download the latest version of speedtest.sh
-echo "Downloading the latest version of speedtest.sh..."
-curl -o "$DEST_SCRIPT" "$REPO_RAW_URL" || print_error "Failed to download speedtest.sh"
+echo -e "${BLUE}Downloading speedtest.sh...${NC}"
+curl -s -o "$SPEEDTEST_SCRIPT_PATH" "$SPEEDTEST_SCRIPT_URL" || print_error "Failed to download speedtest.sh"
+chmod +x "$SPEEDTEST_SCRIPT_PATH" || print_error "Failed to make speedtest.sh executable"
+echo -e "${CHECKMARK}${GREEN} speedtest.sh downloaded and made executable.${NC}"
 
-# Make the script executable
-echo "Making the script executable..."
-chmod +x "$DEST_SCRIPT" || print_error "Failed to make speedtest.sh executable"
+# Download the latest version of update_crontab.sh
+echo -e "${BLUE}Downloading update_crontab.sh...${NC}"
+curl -s -o "$UPDATE_CRONTAB_SCRIPT_PATH" "$UPDATE_CRONTAB_SCRIPT_URL" || print_error "Failed to download update_crontab.sh"
+chmod +x "$UPDATE_CRONTAB_SCRIPT_PATH" || print_error "Failed to make update_crontab.sh executable"
+echo -e "${CHECKMARK}${GREEN} update_crontab.sh downloaded and made executable.${NC}"
 
-echo "Downloaded and installed the latest version of speedtest.sh to $DEST_SCRIPT"
+# Run speedtest_wrapper.sh to set up and run the speed test
+echo -e "${BLUE}Running speedtest_wrapper.sh...${NC}"
+"$WRAPPER_SCRIPT_PATH" || print_error "Failed to execute speedtest_wrapper.sh"
+
+echo -e "${CHECKMARK}${GREEN} VeriNexus Speed Test environment set up successfully!${NC}"
