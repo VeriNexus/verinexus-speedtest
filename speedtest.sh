@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.6.6"
+SCRIPT_VERSION="2.6.7"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -23,8 +23,8 @@ if [ "$SCRIPT_DIR" != "$BASE_DIR" ]; then
                 echo "Failed to create directory $BASE_DIR. Exiting."
                 exit 1
             }
-        fi
-    fi
+        }
+    fi  # <-- Moved 'fi' here, outside the command group
 
     # Copy the script to $BASE_DIR
     echo "Copying script to $BASE_DIR..."
@@ -260,7 +260,7 @@ apply_forced_errors() {
             rm -f "$FORCED_ERROR_FILE"
             log_message "INFO" "Deleted local copy of forced error file."
         fi
-    fi
+    }
 }
 
 # Function to compare versions using awk
