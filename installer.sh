@@ -1,14 +1,15 @@
 #!/bin/bash
 # File: installer.sh
-# Version: 1.1.0
-# Date: 23/10/2024
+# Version: 1.3.0
+# Date: [Today's Date]
 
 # Description:
 # This installer script sets up the VeriNexus Speed Test environment on a new machine.
 # It installs necessary dependencies, downloads required scripts, and sets up the crontab.
+# It includes handling for package manager locks by waiting until the lock is released.
 
 # Version number of the installer script
-INSTALLER_VERSION="1.1.0"
+INSTALLER_VERSION="1.3.0"
 
 # Base directory for the script
 BASE_DIR="/VeriNexus"
@@ -45,14 +46,52 @@ print_error() {
 # Function to install dependencies
 install_dependencies() {
     echo -e "${BLUE}Installing necessary dependencies...${NC}"
-    sudo apt-get update || print_error "Failed to update package list"
 
-    dependencies=("awk" "curl" "jq" "dnsutils" "speedtest-cli" "iputils-ping" "iproute2" "tput" "grep" "sed" "hostname" "date" "coreutils")
+    # Update package list with lock handling
+    wait_for_lock
+    sudo apt-get update -y || print_error "Failed to update package list"
+
+    # List of dependencies with actual package names
+    dependencies=(
+        "gawk"           # GNU awk implementation
+        "curl"
+        "jq"
+        "dnsutils"       # Provides dig
+        "speedtest-cli"
+        "iputils-ping"
+        "iproute2"       # Provides ip command
+        "tput"           # Provided by ncurses-bin
+        "grep"
+        "sed"
+        "hostname"
+        "date"
+        "coreutils"      # Provides sleep and other core utilities
+    )
+
     for dep in "${dependencies[@]}"; do
         echo -e "${BLUE}Installing $dep...${NC}"
+        wait_for_lock
         sudo apt-get install -y "$dep" || print_error "Failed to install $dep"
     done
     echo -e "${CHECKMARK}${GREEN} All dependencies installed.${NC}"
+}
+
+# Function to wait for package manager lock to be released
+wait_for_lock() {
+    local max_attempts=30
+    local attempt=1
+    local lock_file="/var/lib/dpkg/lock-frontend"
+    while sudo fuser $lock_file >/dev/null 2>&1; do
+        if [ $attempt -eq 1 ]; then
+            echo -e "${YELLOW}Package manager is locked by another process. Waiting for it to be released...${NC}"
+        fi
+        if [ $attempt -ge $max_attempts ]; then
+            echo -e "${CROSS}${RED} Timeout reached while waiting for package manager lock. Exiting.${NC}"
+            exit 1
+        fi
+        sleep 5
+        attempt=$((attempt + 1))
+    done
 }
 
 # Ensure the base directory exists
