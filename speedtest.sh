@@ -1,15 +1,18 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.6.1.1"
+SCRIPT_VERSION="2.6.1.2"
 
 # GitHub repository raw URLs for the script and forced error file
 REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
 FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
+UPDATE_CRON_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/update_crontab.sh"
+
 
 # Temporary files for comparison and forced error
 TEMP_SCRIPT="/tmp/latest_speedtest.sh"
 FORCED_ERROR_FILE="/tmp/force_error.txt"
+UPDATE_CRON_SCRIPT="/tmp/update_crontab.sh"
 LOG_FILE="/var/log/verinexus_speedtest.log"
 [ -w "/var/log" ] || LOG_FILE="/tmp/verinexus_speedtest.log"
 MAX_LOG_SIZE=5242880  # 5MB
@@ -93,7 +96,7 @@ perform_dns_tests() {
 # Function to check dependencies
 check_dependencies() {
     local missing_dependencies=false
-    local dependencies=("awk" "curl" "jq" "dig" "speedtest-cli" "ping")
+    local dependencies=("awk" "curl" "jq" "dig" "speedtest-cli" "ping" "sudo")
 
     for dep in "${dependencies[@]}"; do
         if ! command -v $dep &> /dev/null; then
@@ -281,11 +284,44 @@ run_speed_test() {
     return 0
 }
 
+# Function to update crontab by downloading and running update_crontab.sh
+update_crontab() {
+    echo -e "${CYAN}====================================================${NC}"
+    echo -e "           ${BOLD}Updating Crontab...${NC}"
+    echo -e "${CYAN}====================================================${NC}"
+
+    # Download the latest update_crontab.sh script
+    curl -s -o "$UPDATE_CRON_SCRIPT" "$UPDATE_CRON_URL"
+    if [ $? -ne 0 ]; then
+        echo -e "${CROSS}${RED} Failed to download update_crontab.sh.${NC}"
+        log_message "ERROR" "Failed to download update_crontab.sh from GitHub."
+        return 1
+    fi
+    chmod +x "$UPDATE_CRON_SCRIPT"
+
+    # Run the update_crontab.sh script with sudo
+    sudo bash "$UPDATE_CRON_SCRIPT"
+    if [ $? -ne 0 ]; then
+        echo -e "${CROSS}${RED} Failed to update crontab using update_crontab.sh.${NC}"
+        log_message "ERROR" "Failed to execute update_crontab.sh."
+        return 1
+    else
+        echo -e "${CHECKMARK}${GREEN} Crontab updated successfully.${NC}"
+        log_message "INFO" "Crontab updated successfully using update_crontab.sh."
+    fi
+
+    echo -e "${CYAN}====================================================${NC}"
+}
+
 # Apply any forced errors
 apply_forced_errors
 
 # Call the update check function
 check_for_updates
+
+# Update crontab by downloading and running update_crontab.sh
+update_crontab || log_message "WARN" "update_crontab.sh encountered an error but script will continue."
+
 
 # Display Title with a Frame
 echo -e "${CYAN}====================================================${NC}"

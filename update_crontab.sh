@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Version number of the script
+SCRIPT_VERSION="1.0.0"
+
 # Define the URL for the reference cron job file
 REFERENCE_CRON_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/reference_cron.txt"
 
