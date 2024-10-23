@@ -1,14 +1,50 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.6.5"
+SCRIPT_VERSION="2.6.6"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
 
-# Ensure base directory exists
-if [ ! -d "$BASE_DIR" ]; then
-    mkdir -p "$BASE_DIR"
+# Determine the absolute path of the script
+SCRIPT_PATH=$(readlink -f "$0")
+SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
+
+# Check if the script is running from $BASE_DIR
+if [ "$SCRIPT_DIR" != "$BASE_DIR" ]; then
+    echo "Script is not running from $BASE_DIR. Attempting to move it there..."
+
+    # Check if $BASE_DIR exists, and create it if necessary
+    if [ ! -d "$BASE_DIR" ]; then
+        echo "Directory $BASE_DIR does not exist. Creating it..."
+        mkdir -p "$BASE_DIR" 2>/dev/null || {
+            echo "Attempting to create directory with sudo..."
+            sudo mkdir -p "$BASE_DIR" || {
+                echo "Failed to create directory $BASE_DIR. Exiting."
+                exit 1
+            }
+        fi
+    fi
+
+    # Copy the script to $BASE_DIR
+    echo "Copying script to $BASE_DIR..."
+    cp "$SCRIPT_PATH" "$BASE_DIR/speedtest.sh" 2>/dev/null || {
+        echo "Attempting to copy script with sudo..."
+        sudo cp "$SCRIPT_PATH" "$BASE_DIR/speedtest.sh" || {
+            echo "Failed to copy script to $BASE_DIR. Exiting."
+            exit 1
+        }
+    }
+
+    # Make it executable
+    chmod +x "$BASE_DIR/speedtest.sh" 2>/dev/null || sudo chmod +x "$BASE_DIR/speedtest.sh"
+
+    # Execute the script from the new location
+    echo "Executing script from $BASE_DIR..."
+    exec "$BASE_DIR/speedtest.sh"
+
+    # Exit the current script
+    exit
 fi
 
 # Check if we have write permission to the base directory
@@ -82,29 +118,6 @@ log_message() {
 # Rotate log file at the start
 rotate_log_file
 
-# Function to perform DNS resolution tests
-perform_dns_tests() {
-    local dns_server=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | head -n 1)
-    if [ -z "$dns_server" ]; then
-        log_message "ERROR" "No DNS server found in /etc/resolv.conf."
-        return
-    fi
-
-    local domains=("example.com" "google.com" "github.com")
-    for domain in "${domains[@]}"; do
-        local start_time=$(date +%s%N)
-        local dns_result=$(dig @$dns_server $domain +short)
-        local end_time=$(date +%s%N)
-        local dns_time=$((($end_time - $start_time) / 1000000))  # Convert to milliseconds
-        if [ -z "$dns_result" ]; then
-            dns_time="0"
-            log_message "WARN" "DNS resolution failed for $domain."
-        fi
-        # Add the DNS resolution time to the InfluxDB data
-        INFLUXDB_DATA="$INFLUXDB_DATA,field_dns_${domain//./_}=$dns_time"
-    done
-}
-
 # Function to check and install dependencies
 check_and_install_dependencies() {
     local missing_dependencies=()
@@ -163,6 +176,29 @@ install_dependencies() {
 
 # Call the check_and_install_dependencies function early in the script
 check_and_install_dependencies
+
+# Function to perform DNS resolution tests
+perform_dns_tests() {
+    local dns_server=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | head -n 1)
+    if [ -z "$dns_server" ]; then
+        log_message "ERROR" "No DNS server found in /etc/resolv.conf."
+        return
+    fi
+
+    local domains=("example.com" "google.com" "github.com")
+    for domain in "${domains[@]}"; do
+        local start_time=$(date +%s%N)
+        local dns_result=$(dig @$dns_server $domain +short)
+        local end_time=$(date +%s%N)
+        local dns_time=$((($end_time - $start_time) / 1000000))  # Convert to milliseconds
+        if [ -z "$dns_result" ]; then
+            dns_time="0"
+            log_message "WARN" "DNS resolution failed for $domain."
+        fi
+        # Add the DNS resolution time to the InfluxDB data
+        INFLUXDB_DATA="$INFLUXDB_DATA,field_dns_${domain//./_}=$dns_time"
+    done
+}
 
 # Function to perform ping tests
 perform_ping_tests() {
