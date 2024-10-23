@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # VeriNexus Installer Script
-# Version: 1.0.0
+# Version: 1.0.1
 # Author: VeriNexus
 # Copyright (c) 2024 VeriNexus. All rights reserved.
 
@@ -27,17 +27,17 @@ echo "Updating package list..."
 sudo apt update || print_error "Failed to update package list"
 
 # Install openssh-server
-echo "Installing openssh-server..."
-sudo apt install -y openssh-server || print_error "Failed to install openssh-server"
+# echo "Installing openssh-server..."
+# sudo apt install -y openssh-server || print_error "Failed to install openssh-server"
 
 # Enable and start the SSH service
-echo "Enabling and starting SSH service..."
-sudo systemctl enable ssh || print_error "Failed to enable SSH service"
-sudo systemctl start ssh || print_error "Failed to start SSH service"
+# echo "Enabling and starting SSH service..."
+# sudo systemctl enable ssh || print_error "Failed to enable SSH service"
+# sudo systemctl start ssh || print_error "Failed to start SSH service"
 
 # Allow SSH through the firewall
-echo "Allowing SSH through the firewall..."
-sudo ufw allow ssh || print_error "Failed to allow SSH through the firewall"
+# echo "Allowing SSH through the firewall..."
+# sudo ufw allow ssh || print_error "Failed to allow SSH through the firewall"
 
 # Check the status of the SSH service
 echo "Checking the status of the SSH service..."
