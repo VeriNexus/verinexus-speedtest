@@ -1,0 +1,45 @@
+<!-- revoke.html -->
+<!-- Version: 1.0 -->
+<!-- Date: 24/10/2023 -->
+<!-- Description: Template for revoking claimed devices -->
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Revoke Device Claims</title>
+</head>
+<body>
+
+<h1>Revoke Device Claims</h1>
+
+<form method="post">
+    <table border="1">
+        <thead>
+            <tr>
+                <th>Select</th>
+                <th>MAC Address</th>
+                <th>Customer ID</th>
+                <th>Customer Name</th>
+                <th>Friendly Name</th>
+                <th>Location</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for device in devices %}
+            <tr>
+                <td><input type="checkbox" name="selected_macs" value="{{ device.mac_address }}"></td>
+                <td>{{ device.mac_address }}</td>
+                <td>{{ device.customer_id }}</td>
+                <td>{{ device.customer_name }}</td>
+                <td>{{ device.friendly_name }}</td>
+                <td>{{ device.location }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <br>
+    <input type="submit" value="Release Claims">
+</form>
+
+</body>
+</html>

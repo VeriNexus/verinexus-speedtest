@@ -1,25 +1,148 @@
+<!-- claim.html -->
+<!-- Version: 1.2 -->
+<!-- Date: 24/10/2024 -->
+<!-- Description: Template for claiming devices, allowing selection of existing or new customers and locations -->
+
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
     <title>Claim Device</title>
+    <script>
+        function toggleCustomerFields() {
+            var existingCustomerRadio = document.getElementById('existing_customer');
+            var newCustomerRadio = document.getElementById('new_customer');
+            var existingCustomerDiv = document.getElementById('existing_customer_div');
+            var newCustomerDiv = document.getElementById('new_customer_div');
+            var locationOptionsDiv = document.getElementById('location_options');
+            var existingLocationDiv = document.getElementById('existing_location_div');
+            var newLocationDiv = document.getElementById('new_location_div');
+            var newCustomerLocationDiv = document.getElementById('new_customer_location_div');
+
+            if (existingCustomerRadio.checked) {
+                existingCustomerDiv.style.display = 'block';
+                newCustomerDiv.style.display = 'none';
+                locationOptionsDiv.style.display = 'block';
+                existingLocationDiv.style.display = 'block';
+                newLocationDiv.style.display = 'none';
+                newCustomerLocationDiv.style.display = 'none';
+                updateLocations();
+            } else {
+                existingCustomerDiv.style.display = 'none';
+                newCustomerDiv.style.display = 'block';
+                locationOptionsDiv.style.display = 'none';
+                existingLocationDiv.style.display = 'none';
+                newLocationDiv.style.display = 'none';
+                newCustomerLocationDiv.style.display = 'block';
+            }
+        }
+
+        function toggleLocationFields() {
+            var existingLocationRadio = document.getElementById('existing_location');
+            var newLocationRadio = document.getElementById('new_location');
+            var existingLocationDiv = document.getElementById('existing_location_div');
+            var newLocationDiv = document.getElementById('new_location_div');
+
+            if (existingLocationRadio.checked) {
+                existingLocationDiv.style.display = 'block';
+                newLocationDiv.style.display = 'none';
+            } else {
+                existingLocationDiv.style.display = 'none';
+                newLocationDiv.style.display = 'block';
+            }
+        }
+
+        function updateLocations() {
+            var customerSelect = document.getElementById('existing_customer_select');
+            var customerId = customerSelect.value;
+            var locationSelect = document.getElementById('existing_location_select');
+
+            var locationsData = {{ locations|tojson }};
+
+            var locations = locationsData[customerId] || [];
+
+            locationSelect.innerHTML = '';
+            for (var i = 0; i < locations.length; i++) {
+                var opt = document.createElement('option');
+                opt.value = locations[i];
+                opt.innerHTML = locations[i];
+                locationSelect.appendChild(opt);
+            }
+        }
+    </script>
 </head>
-<body>
-    <h1>Claim Device</h1>
-    <form action="{{ url_for('claim_device_post') }}" method="post">
-        <label for="mac_address">MAC Address:</label>
-        <select name="mac_address" id="mac_address">
-            {% for mac in unclaimed_macs %}
-                <option value="{{ mac }}">{{ mac }}</option>
+<body onload="toggleCustomerFields(); toggleLocationFields();">
+
+<h1>Claim Device</h1>
+
+<form method="post">
+    <label for="mac_address">Select MAC Address to Claim:</label>
+    <select name="mac_address" id="mac_address" required>
+        {% for mac in unclaimed_macs %}
+            <option value="{{ mac }}">{{ mac }}</option>
+        {% endfor %}
+    </select><br><br>
+
+    <h2>Customer</h2>
+    <input type="radio" id="existing_customer" name="customer_option" value="existing" onclick="toggleCustomerFields()" checked>
+    <label for="existing_customer">Existing Customer</label>
+    <input type="radio" id="new_customer" name="customer_option" value="new" onclick="toggleCustomerFields()">
+    <label for="new_customer">New Customer</label><br>
+
+    <div id="existing_customer_div">
+        <label for="existing_customer_select">Select Customer:</label>
+        <select name="existing_customer_id" id="existing_customer_select" onchange="updateLocations()">
+            {% for customer_id, customer_name in customers.items() %}
+                <option value="{{ customer_id }}">{{ customer_name }}</option>
             {% endfor %}
-        </select><br>
-        <label for="customer_name">Customer Name:</label>
-        <input type="text" id="customer_name" name="customer_name"><br>
-        <label for="friendly_name">Friendly Name:</label>
-        <input type="text" id="friendly_name" name="friendly_name"><br>
-        <label for="location">Location:</label>
-        <input type="text" id="location" name="location"><br>
-        <input type="submit" value="Claim">
-    </form>
+        </select>
+    </div>
+
+    <div id="new_customer_div" style="display:none;">
+        <label for="new_customer_name">New Customer Name:</label>
+        <input type="text" name="new_customer_name" id="new_customer_name">
+    </div>
+
+    <h2>Location</h2>
+
+    <!-- Location options for existing customer -->
+    <div id="location_options">
+        <input type="radio" id="existing_location" name="location_option" value="existing" onclick="toggleLocationFields()" checked>
+        <label for="existing_location">Existing Location</label>
+        <input type="radio" id="new_location" name="location_option" value="new" onclick="toggleLocationFields()">
+        <label for="new_location">New Location</label><br>
+    </div>
+
+    <!-- Existing Location Selection -->
+    <div id="existing_location_div">
+        <label for="existing_location_select">Select Location:</label>
+        <select name="existing_location" id="existing_location_select">
+            <!-- Options will be populated by JavaScript -->
+        </select>
+    </div>
+
+    <!-- New Location Input -->
+    <div id="new_location_div" style="display:none;">
+        <label for="new_location_name">New Location Name:</label>
+        <input type="text" name="new_location_name" id="new_location_name">
+    </div>
+
+    <!-- New Customer Location Input -->
+    <div id="new_customer_location_div" style="display:none;">
+        <label for="new_customer_location_name">Location Name:</label>
+        <input type="text" name="new_customer_location_name" id="new_customer_location_name">
+    </div>
+
+    <br><br>
+    <label for="friendly_name">Friendly Name:</label>
+    <input type="text" name="friendly_name" id="friendly_name" required><br><br>
+
+    <input type="submit" value="Claim Device">
+</form>
+
+<script>
+    // Initialize locations on page load
+    updateLocations();
+</script>
+
 </body>
 </html>
