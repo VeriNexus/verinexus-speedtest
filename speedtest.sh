@@ -1,67 +1,12 @@
 #!/bin/bash
 
 # Version number of the script
-SCRIPT_VERSION="2.6.8"
+SCRIPT_VERSION="2.7.1"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
 
-# Determine the absolute path of the script
-SCRIPT_PATH=$(readlink -f "$0")
-SCRIPT_DIR=$(dirname "$SCRIPT_PATH")
-
-# Check if the script is running from $BASE_DIR
-if [ "$SCRIPT_DIR" != "$BASE_DIR" ]; then
-    echo "Script is not running from $BASE_DIR. Attempting to move it there..."
-
-    # Check if $BASE_DIR exists, and create it if necessary
-    if [ ! -d "$BASE_DIR" ]; then
-        echo "Directory $BASE_DIR does not exist. Creating it..."
-        mkdir -p "$BASE_DIR" 2>/dev/null || {
-            echo "Attempting to create directory with sudo..."
-            sudo mkdir -p "$BASE_DIR" || {
-                echo "Failed to create directory $BASE_DIR. Exiting."
-                exit 1
-            }
-        }
-    fi  # Corrected placement of 'fi'
-
-    # Copy the script to $BASE_DIR
-    echo "Copying script to $BASE_DIR..."
-    cp "$SCRIPT_PATH" "$BASE_DIR/speedtest.sh" 2>/dev/null || {
-        echo "Attempting to copy script with sudo..."
-        sudo cp "$SCRIPT_PATH" "$BASE_DIR/speedtest.sh" || {
-            echo "Failed to copy script to $BASE_DIR. Exiting."
-            exit 1
-        }
-    }
-
-    # Make it executable
-    chmod +x "$BASE_DIR/speedtest.sh" 2>/dev/null || sudo chmod +x "$BASE_DIR/speedtest.sh"
-
-    # Execute the script from the new location
-    echo "Executing script from $BASE_DIR..."
-    exec "$BASE_DIR/speedtest.sh"
-
-    # Exit the current script
-    exit
-fi
-
-# Check if we have write permission to the base directory
-if [ ! -w "$BASE_DIR" ]; then
-    echo "Warning: No write permission to $BASE_DIR. Using /tmp/ instead."
-    BASE_DIR="/tmp"
-fi
-
-# GitHub repository raw URLs
-REPO_RAW_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
-FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
-UPDATE_CRON_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/update_crontab.sh"
-
-# Temporary files for comparison and forced error
-TEMP_SCRIPT="$BASE_DIR/latest_speedtest.sh"
-FORCED_ERROR_FILE="$BASE_DIR/force_error.txt"
-UPDATE_CRON_SCRIPT="$BASE_DIR/update_crontab.sh"
+# Log file configuration
 LOG_FILE="$BASE_DIR/verinexus_speedtest.log"
 MAX_LOG_SIZE=5242880  # 5MB
 
@@ -84,10 +29,6 @@ NC='\033[0m' # No Color
 # Symbols
 CHECKMARK="${GREEN}✔${NC}"
 CROSS="${RED}✖${NC}"
-
-# Maximum number of retries to prevent infinite loops
-MAX_RETRIES=3
-RETRY_COUNT=0
 
 # Logging levels
 LOG_LEVELS=("INFO" "WARN" "ERROR")
@@ -121,7 +62,7 @@ rotate_log_file
 # Function to check and install dependencies
 check_and_install_dependencies() {
     local missing_dependencies=()
-    local dependencies=("awk" "curl" "jq" "dig" "speedtest-cli" "ping" "ip" "tput" "grep" "sed" "hostname" "date" "sleep" "sudo")
+    local dependencies=("awk" "curl" "jq" "dig" "speedtest-cli" "ping" "ip" "tput" "grep" "sed" "hostname" "date" "sleep")
 
     for dep in "${dependencies[@]}"; do
         if ! command -v $dep &> /dev/null; then
@@ -144,7 +85,7 @@ check_and_install_dependencies() {
             echo -e "${CROSS} ${RED}Please install the missing dependencies and rerun the script.${NC}"
             exit 1
         fi
-    fi  # Corrected: Added missing 'fi' here
+    fi
 }
 
 # Function to install dependencies
@@ -176,6 +117,27 @@ install_dependencies() {
 
 # Call the check_and_install_dependencies function early in the script
 check_and_install_dependencies
+
+# Function to ensure the wrapper script exists
+ensure_wrapper_script() {
+    local WRAPPER_SCRIPT="$BASE_DIR/speedtest_wrapper.sh"
+    local WRAPPER_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest_wrapper.sh"
+
+    if [ ! -f "$WRAPPER_SCRIPT" ]; then
+        echo -e "${YELLOW}Wrapper script not found. Downloading...${NC}"
+        curl -s -o "$WRAPPER_SCRIPT" "$WRAPPER_URL"
+        if [ $? -ne 0 ] || [ ! -s "$WRAPPER_SCRIPT" ]; then
+            echo -e "${CROSS}${RED} Failed to download wrapper script.${NC}"
+            log_message "ERROR" "Failed to download wrapper script from GitHub."
+            exit 1
+        fi
+        chmod +x "$WRAPPER_SCRIPT"
+        echo -e "${CHECKMARK}${GREEN} Wrapper script downloaded and made executable.${NC}"
+        log_message "INFO" "Wrapper script downloaded and made executable."
+    else
+        echo -e "${CHECKMARK}${GREEN} Wrapper script already exists.${NC}"
+    fi
+}
 
 # Function to perform DNS resolution tests
 perform_dns_tests() {
@@ -239,6 +201,9 @@ create_database_if_not_exists() {
 
 # Function to check for forced error file and apply its effects
 apply_forced_errors() {
+    local FORCED_ERROR_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/force_error.txt"
+    local FORCED_ERROR_FILE="$BASE_DIR/force_error.txt"
+
     curl -s -H 'Cache-Control: no-cache, no-store, must-revalidate' \
          -H 'Pragma: no-cache' \
          -H 'Expires: 0' \
@@ -263,89 +228,11 @@ apply_forced_errors() {
     fi
 }
 
-# Function to compare versions using awk
-version_gt() {
-    awk -v v1="$1" -v v2="$2" '
-    BEGIN {
-        split(v1, a, ".")
-        split(v2, b, ".")
-        for (i = 1; i <= 3; i++) {
-            a_i = (i in a) ? a[i] : 0
-            b_i = (i in b) ? b[i] : 0
-            if (a_i > b_i) {
-                exit 0  # v1 > v2
-            } else if (a_i < b_i) {
-                exit 1  # v1 < v2
-            }
-        }
-        exit 1  # v1 == v2
-    }'
-}
-
-# Function to check for updates with retry logic
-check_for_updates() {
-    echo -e "${CYAN}====================================================${NC}"
-    echo -e "           ${BOLD}Checking for Script Updates...${NC}"
-    echo -e "${CYAN}====================================================${NC}"
-
-    # Clear any previous version of the file
-    rm -f "$TEMP_SCRIPT"
-
-    local max_attempts=3
-    local attempt=0
-    while [ $attempt -lt $max_attempts ]; do
-        curl -H 'Cache-Control: no-cache, no-store, must-revalidate' \
-             -H 'Pragma: no-cache' \
-             -H 'Expires: 0' \
-             -s -o "$TEMP_SCRIPT" "$REPO_RAW_URL"
-        if [ $? -eq 0 ]; then
-            break
-        else
-            log_message "WARN" "Failed to download the script from GitHub. Retrying...($attempt)"
-        fi
-        attempt=$((attempt + 1))
-        sleep 5
-    done
-
-    # Ensure the downloaded file is valid
-    if [ ! -s "$TEMP_SCRIPT" ]; then
-        log_message "ERROR" "Downloaded script is empty."
-        return 1
-    fi
-
-    # Extract version from the downloaded script
-    LATEST_VERSION=$(grep -oP 'SCRIPT_VERSION="\K[0-9.]+' "$TEMP_SCRIPT")
-    if [ -z "$LATEST_VERSION" ]; then
-        log_message "ERROR" "Failed to extract version from the downloaded script."
-        return 1
-    fi
-
-    echo -e "${CHECKMARK} Current version: ${YELLOW}$SCRIPT_VERSION${NC}"
-    echo -e "${CHECKMARK} Latest version: ${YELLOW}$LATEST_VERSION${NC}"
-
-    # Compare versions to check if we should upgrade
-    if version_gt "$LATEST_VERSION" "$SCRIPT_VERSION"; then
-        echo -e "${YELLOW}New version available: $LATEST_VERSION${NC}"
-        cp "$TEMP_SCRIPT" "$0"
-        chmod +x "$0"
-        log_message "INFO" "Updated script to version $LATEST_VERSION."
-        if [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; then
-            RETRY_COUNT=$((RETRY_COUNT + 1))
-            echo -e "${CHECKMARK} Update downloaded to version $LATEST_VERSION. Restarting script... (Attempt $RETRY_COUNT of $MAX_RETRIES)"
-            exec "$0"
-        else
-            echo -e "${CROSS} Maximum retries reached. Exiting to prevent infinite loop."
-            exit 1
-        fi
-    else
-        echo -e "${GREEN}${CHECKMARK} No update needed. You are using the latest version.${NC}"
-    fi
-
-    echo -e "${CYAN}====================================================${NC}"
-}
-
 # Function to update crontab by downloading and running update_crontab.sh
 update_crontab() {
+    local UPDATE_CRON_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/update_crontab.sh"
+    local UPDATE_CRON_SCRIPT="$BASE_DIR/update_crontab.sh"
+
     echo -e "${CYAN}====================================================${NC}"
     echo -e "           ${BOLD}Updating Crontab...${NC}"
     echo -e "${CYAN}====================================================${NC}"
@@ -359,8 +246,8 @@ update_crontab() {
     fi
     chmod +x "$UPDATE_CRON_SCRIPT"
 
-    # Run the update_crontab.sh script with sudo
-    sudo bash "$UPDATE_CRON_SCRIPT"
+    # Run the update_crontab.sh script
+    bash "$UPDATE_CRON_SCRIPT" "$BASE_DIR/speedtest_wrapper.sh"
     if [ $? -ne 0 ]; then
         echo -e "${CROSS}${RED} Failed to update crontab using update_crontab.sh.${NC}"
         log_message "ERROR" "Failed to execute update_crontab.sh."
@@ -398,11 +285,11 @@ run_speed_test() {
     return 0
 }
 
+# Ensure the wrapper script exists before updating crontab
+ensure_wrapper_script
+
 # Apply any forced errors
 apply_forced_errors
-
-# Call the update check function
-check_for_updates
 
 # Update crontab by downloading and running update_crontab.sh
 update_crontab || log_message "WARN" "update_crontab.sh encountered an error but script will continue."
@@ -444,28 +331,14 @@ echo -e "${CHECKMARK}${GREEN}Date (UK): $UK_DATE, Time (UK): $UK_TIME${NC}"
 
 # Step 3: Fetching Private/Public IPs
 echo -ne "${CYAN}Step 3: Fetching Private/Public IPs... "
-if [ "$FORCE_FAIL_PRIVATE_IP" = true ]; then
-    log_message "WARN" "Forced failure to fetch Private IP."
-    PRIVATE_IP="N/A"
-else
-    PRIVATE_IP=$(hostname -I | awk '{print $1}')
-fi
-
-if [ "$FORCE_FAIL_PUBLIC_IP" = true ]; then
-    log_message "WARN" "Forced failure to fetch Public IP."
-    PUBLIC_IP="N/A"
-else
-    PUBLIC_IP=$(curl -s ifconfig.co)
-fi
+PRIVATE_IP=$(hostname -I | awk '{print $1}')
+PUBLIC_IP=$(curl -s ifconfig.co)
 echo -e "${CHECKMARK}${GREEN}Private IP: $PRIVATE_IP, Public IP: $PUBLIC_IP${NC}"
 
 # Step 4: Fetching MAC Address and LAN IP
 echo -ne "${CYAN}Step 4: Fetching MAC Address and LAN IP... "
 ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
-if [ "$FORCE_FAIL_MAC" = true ]; then
-    log_message "WARN" "Forced failure to fetch MAC Address."
-    MAC_ADDRESS="N/A"
-elif [ -n "$ACTIVE_IFACE" ]; then
+if [ -n "$ACTIVE_IFACE" ]; then
     MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
     LAN_IP=$(ip addr show $ACTIVE_IFACE | grep "inet " | awk '{print $2}' | cut -d/ -f1)
 else
@@ -527,3 +400,6 @@ log_message "INFO" "Data saved to InfluxDB database $INFLUXDB_DB."
 echo -e "${CYAN}====================================================${NC}"
 echo -e "${BOLD}VeriNexus Speed Test Completed Successfully!${NC}"
 echo -e "${CYAN}====================================================${NC}"
+
+# Exit script
+exit 0
