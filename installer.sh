@@ -1,28 +1,30 @@
 #!/bin/bash
 # File: installer.sh
-# Version: 1.4.0
-# Date: 23/10/2024
+# Version: 1.5.0
+# Date: 28/10/2024
 
 # Description:
 # This installer script sets up the VeriNexus Speed Test environment on a new machine.
-# It installs necessary dependencies, downloads required scripts, and sets up the crontab.
-# It includes handling for package manager locks by waiting until the lock is released.
+# It installs necessary dependencies, downloads required scripts, sets up the virtual environment,
+# installs Python dependencies, and sets up the mqtt_speedtest.py script as a service.
 
 # Version number of the installer script
-INSTALLER_VERSION="1.4.0"
+INSTALLER_VERSION="1.5.0"
 
 # Base directory for the script
-BASE_DIR="/VeriNexus"
+BASE_DIR="/home/pi/VeriNexus"  # Update if necessary
 
 # URLs to download scripts
 SPEEDTEST_SCRIPT_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest.sh"
 WRAPPER_SCRIPT_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest_wrapper.sh"
 UPDATE_CRONTAB_SCRIPT_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/update_crontab.sh"
+MQTT_SPEEDTEST_SCRIPT_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/mqtt_speedtest.py"
 
 # Paths to scripts
 SPEEDTEST_SCRIPT_PATH="$BASE_DIR/speedtest.sh"
 WRAPPER_SCRIPT_PATH="$BASE_DIR/speedtest_wrapper.sh"
 UPDATE_CRONTAB_SCRIPT_PATH="$BASE_DIR/update_crontab.sh"
+MQTT_SPEEDTEST_SCRIPT_PATH="$BASE_DIR/mqtt_speedtest.py"
 
 # ANSI Color Codes
 RED='\033[0;31m'
@@ -53,6 +55,8 @@ install_dependencies() {
 
     # List of dependencies with actual package names
     dependencies=(
+        "python3-venv"
+        "python3-pip"
         "gawk"           # GNU awk implementation
         "curl"
         "jq"
@@ -107,6 +111,54 @@ cd "$BASE_DIR" || print_error "Failed to change directory to $BASE_DIR"
 
 # Install dependencies
 install_dependencies
+
+# Set up Python virtual environment
+echo -e "${BLUE}Setting up Python virtual environment...${NC}"
+if [ ! -d "$BASE_DIR/mqtt-env" ]; then
+    python3 -m venv mqtt-env || print_error "Failed to create virtual environment"
+    echo -e "${CHECKMARK}${GREEN} Virtual environment created.${NC}"
+else
+    echo -e "${CHECKMARK}${GREEN} Virtual environment already exists.${NC}"
+fi
+
+# Activate virtual environment and install Python dependencies
+echo -e "${BLUE}Installing Python dependencies in virtual environment...${NC}"
+source mqtt-env/bin/activate || print_error "Failed to activate virtual environment"
+pip install --upgrade pip
+pip install paho-mqtt influxdb || print_error "Failed to install Python dependencies"
+deactivate
+echo -e "${CHECKMARK}${GREEN} Python dependencies installed.${NC}"
+
+# Download the latest version of mqtt_speedtest.py
+echo -e "${BLUE}Downloading mqtt_speedtest.py...${NC}"
+curl -s -o "$MQTT_SPEEDTEST_SCRIPT_PATH" "$MQTT_SPEEDTEST_SCRIPT_URL" || print_error "Failed to download mqtt_speedtest.py"
+chmod +x "$MQTT_SPEEDTEST_SCRIPT_PATH" || print_error "Failed to make mqtt_speedtest.py executable"
+echo -e "${CHECKMARK}${GREEN} mqtt_speedtest.py downloaded and made executable.${NC}"
+
+# Create systemd service for mqtt_speedtest.py
+echo -e "${BLUE}Setting up systemd service for mqtt_speedtest.py...${NC}"
+SERVICE_FILE="/etc/systemd/system/mqtt_speedtest.service"
+
+sudo bash -c "cat > $SERVICE_FILE" <<EOF
+[Unit]
+Description=MQTT Speedtest Service
+After=network.target
+
+[Service]
+Type=simple
+User=$USER
+WorkingDirectory=$BASE_DIR
+ExecStart=/bin/bash -c 'source $BASE_DIR/mqtt-env/bin/activate && exec python3 mqtt_speedtest.py'
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo systemctl daemon-reload || print_error "Failed to reload systemd daemon"
+sudo systemctl enable mqtt_speedtest.service || print_error "Failed to enable mqtt_speedtest.service"
+sudo systemctl start mqtt_speedtest.service || print_error "Failed to start mqtt_speedtest.service"
+echo -e "${CHECKMARK}${GREEN} mqtt_speedtest.py service set up and started.${NC}"
 
 # Download the latest version of speedtest_wrapper.sh
 echo -e "${BLUE}Downloading speedtest_wrapper.sh...${NC}"
