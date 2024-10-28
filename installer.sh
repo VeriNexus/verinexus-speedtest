@@ -1,15 +1,16 @@
 #!/bin/bash
 # File: installer.sh
-# Version: 1.7.0
+# Version: 1.8.0
 # Date: 28/10/2024
 
 # Description:
 # This installer script sets up the VeriNexus Speed Test environment on a new machine.
 # It installs necessary dependencies, downloads required scripts, sets up the virtual environment,
 # installs Python dependencies, and sets up the mqtt_speedtest.py script as a service.
+# It includes improved error handling and ensures correct permissions.
 
 # Version number of the installer script
-INSTALLER_VERSION="1.7.0"
+INSTALLER_VERSION="1.8.0"
 
 # Base directory for the script
 BASE_DIR="/home/verinexus/VeriNexus"  # Ensure this is set to your home directory
@@ -97,7 +98,7 @@ wait_for_lock() {
     done
 }
 
-# Ensure the base directory exists
+# Ensure the base directory exists and has correct permissions
 echo -e "${BLUE}Ensuring base directory exists...${NC}"
 if [ ! -d "$BASE_DIR" ]; then
     mkdir -p "$BASE_DIR" || print_error "Failed to create directory $BASE_DIR"
@@ -105,6 +106,9 @@ if [ ! -d "$BASE_DIR" ]; then
 else
     echo -e "${CHECKMARK}${GREEN} Base directory already exists at $BASE_DIR${NC}"
 fi
+
+# Ensure the current user owns the base directory
+sudo chown -R "$USER":"$USER" "$BASE_DIR" || print_error "Failed to set ownership of $BASE_DIR"
 
 # Change to the base directory
 cd "$BASE_DIR" || print_error "Failed to change directory to $BASE_DIR"
@@ -136,9 +140,20 @@ curl -s -o "$UPDATE_CRONTAB_SCRIPT_PATH" "$UPDATE_CRONTAB_SCRIPT_URL" || print_e
 chmod +x "$UPDATE_CRONTAB_SCRIPT_PATH" || print_error "Failed to make update_crontab.sh executable"
 echo -e "${CHECKMARK}${GREEN} update_crontab.sh downloaded and made executable.${NC}"
 
-# Run speedtest_wrapper.sh to set up and run the speed test
+# Run speedtest_wrapper.sh
 echo -e "${BLUE}Running speedtest_wrapper.sh...${NC}"
-"$WRAPPER_SCRIPT_PATH" || print_error "Failed to execute speedtest_wrapper.sh"
+"$WRAPPER_SCRIPT_PATH"
+if [ $? -ne 0 ]; then
+    echo -e "${YELLOW}speedtest_wrapper.sh failed, attempting to run with sudo...${NC}"
+    sudo "$WRAPPER_SCRIPT_PATH"
+    if [ $? -ne 0 ]; then
+        print_error "Failed to execute speedtest_wrapper.sh even with sudo"
+    else
+        echo -e "${CHECKMARK}${GREEN} speedtest_wrapper.sh executed successfully with sudo.${NC}"
+    fi
+else
+    echo -e "${CHECKMARK}${GREEN} speedtest_wrapper.sh executed successfully.${NC}"
+fi
 
 # Set up Python virtual environment
 echo -e "${BLUE}Setting up Python virtual environment...${NC}"
@@ -152,8 +167,7 @@ fi
 # Activate virtual environment and install Python dependencies
 echo -e "${BLUE}Installing Python dependencies in virtual environment...${NC}"
 source mqtt-env/bin/activate || print_error "Failed to activate virtual environment"
-# The mqtt_speedtest.py script will handle dependency installation
-# But we can pre-install dependencies to speed up the process
+# Pre-install dependencies to speed up the process
 pip install --upgrade pip
 pip install paho-mqtt influxdb || print_error "Failed to install Python dependencies"
 deactivate
@@ -170,7 +184,7 @@ After=network.target
 
 [Service]
 Type=simple
-User=verinexus
+User=$USER
 WorkingDirectory=$BASE_DIR
 ExecStart=/bin/bash -c 'source $BASE_DIR/mqtt-env/bin/activate && exec python3 mqtt_speedtest.py'
 Restart=on-failure
