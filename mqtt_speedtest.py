@@ -9,7 +9,7 @@ import time
 import datetime
 
 # Version number
-VERSION = "1.0.3"
+VERSION = "1.0.4"
 FILENAME = "mqtt_speedtest.py"
 
 # Set up logging for full debugging and progress information
@@ -51,7 +51,7 @@ mac_address = get_mac_address()
 logger.info(f"MAC Address: {mac_address}")
 
 # Define the MQTT broker details
-MQTT_BROKER = "mqtt.verinexus.com"
+MQTT_BROKER = "dashboard.verinexus.com"
 MQTT_PORT = 1883
 
 # Define the topics
@@ -96,7 +96,7 @@ def run_speedtest():
     logger.info("Starting speedtest...")
     try:
         result = subprocess.run(
-            ["speedtest-cli", "--json"],
+            ["speedtest-cli", "--json", "--share"],
             capture_output=True,
             text=True,
             timeout=300
@@ -123,7 +123,47 @@ def run_speedtest():
     iso_time = current_time.isoformat()
     speedtest_data['human_readable_time'] = iso_time
     speedtest_data['timestamp'] = int(current_time.timestamp())
+    speedtest_data['share_id'] = extract_share_id(speedtest_data.get('share', ''))
+
+    # Get LAN IP
+    speedtest_data['lan_ip'] = get_lan_ip()
+
+    # Get Hostname
+    speedtest_data['hostname'] = get_hostname()
+
+    # Get Date and Time in UK Timezone
+    uk_timezone = datetime.timezone(datetime.timedelta(hours=0))  # UTC
+    uk_time = datetime.datetime.now(uk_timezone)
+    speedtest_data['uk_date'] = uk_time.strftime('%Y-%m-%d')
+    speedtest_data['uk_time'] = uk_time.strftime('%H:%M:%S')
+
     return speedtest_data
+
+def extract_share_id(share_url):
+    if share_url:
+        return share_url.split('/')[-1].split('.')[0]  # Remove .png if present
+    else:
+        return ''
+
+def get_lan_ip():
+    try:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(('8.8.8.8', 80))
+        lan_ip = s.getsockname()[0]
+        s.close()
+        return lan_ip
+    except Exception as e:
+        logger.error(f"Failed to get LAN IP: {e}")
+        return ''
+
+def get_hostname():
+    try:
+        import socket
+        return socket.gethostname()
+    except Exception as e:
+        logger.error(f"Failed to get hostname: {e}")
+        return ''
 
 # Function to write data to InfluxDB
 def write_to_influxdb(data):
@@ -132,25 +172,21 @@ def write_to_influxdb(data):
         "measurement": INFLUXDB_MEASUREMENT,
         "tags": {
             "tag_mac_address": data['mac_address'],
-            "tag_client_ip": data['client']['ip'],
-            "tag_client_isp": data['client']['isp'],
-            "tag_client_country": data['client']['country'],
             "tag_server_id": data['server']['id'],
-            "tag_server_sponsor": data['server']['sponsor'],
-            "tag_server_name": data['server']['name'],
-            "tag_server_country": data['server']['country'],
-            "tag_server_host": data['server'].get('host', ''),
+            "tag_public_ip": data['client']['ip'],
+            "tag_hostname": data.get('hostname', ''),
+            "tag_location": data['server']['name']
         },
         "fields": {
             "field_mac_address": data['mac_address'],
-            "field_download": data['download_mbps'],
-            "field_upload": data['upload_mbps'],
-            "field_ping": data['ping'],
-            "field_timestamp": data['timestamp'],
-            "field_human_readable_time": data['human_readable_time'],
-            "field_share": data.get('share', ''),
-            "field_server_distance": float(data['server']['d']),
-            "field_server_latency": data['server']['latency']
+            "field_download_speed": data['download_mbps'],
+            "field_upload_speed": data['upload_mbps'],
+            "field_latency": data['ping'],
+            "field_lan_ip": data.get('lan_ip', ''),
+            "field_date": data.get('uk_date', ''),
+            "field_time": data.get('uk_time', ''),
+            "field_server_name": data['server']['name'],
+            "field_share_id": data.get('share_id', '')
         },
         "time": int(data['timestamp'] * 1e9)  # Convert to nanoseconds
     }
@@ -184,7 +220,8 @@ def on_message(client, userdata, msg):
                 print(f"Latency       : {speedtest_result['ping']} ms")
                 print(f"MAC Address   : {speedtest_result['mac_address']}")
                 print(f"Test DateTime : {speedtest_result['human_readable_time']}")
-                print(f"Test Server   : {speedtest_result['server']['name']}\n")
+                print(f"Test Server   : {speedtest_result['server']['name']}")
+                print(f"Share ID      : {speedtest_result.get('share_id', '')}\n")
 
                 logger.info("Returning to MQTT client loop.")
             else:
