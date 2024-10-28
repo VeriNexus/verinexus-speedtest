@@ -10,7 +10,7 @@ import datetime
 import importlib.util
 
 # Version number
-VERSION = "1.0.6"
+VERSION = "1.0.7"
 FILENAME = "mqtt_speedtest.py"
 
 # Set up logging for full debugging and progress information
@@ -245,4 +245,19 @@ client.on_message = on_message
 
 # Connect to the broker and subscribe to the trigger topic
 try:
-    logger.info(f"Connecting to MQTT Broker at
+    logger.info(f"Connecting to MQTT Broker at {MQTT_BROKER}:{MQTT_PORT}")
+    client.connect(MQTT_BROKER, MQTT_PORT, 60)
+    client.subscribe(ALL_TOPICS)
+    logger.info(f"Subscribed to topic {ALL_TOPICS}")
+except Exception as e:
+    logger.error(f"Failed to connect to MQTT Broker: {e}")
+    sys.exit(1)
+
+# Start the MQTT client loop to listen for messages
+logger.info("Starting MQTT client loop...")
+try:
+    client.loop_forever()
+except KeyboardInterrupt:
+    logger.info("MQTT client loop interrupted by user.")
+except Exception as e:
+    logger.error(f"Unexpected error in MQTT client loop: {e}")
