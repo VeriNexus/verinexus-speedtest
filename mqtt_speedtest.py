@@ -1,20 +1,44 @@
 #!/usr/bin/env python3
 
-import paho.mqtt.client as mqtt
+import sys
 import subprocess
 import json
 import uuid
 import logging
 import time
-from influxdb import InfluxDBClient
+import datetime
 
 # Version number
-VERSION = "1.0.2"
+VERSION = "1.0.3"
 FILENAME = "mqtt_speedtest.py"
 
 # Set up logging for full debugging and progress information
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(FILENAME)
+
+# Dependency check and installation
+required_packages = ['paho-mqtt', 'influxdb']
+for package in required_packages:
+    try:
+        __import__(package.replace('-', '_'))
+    except ImportError:
+        logger.warning(f"Package '{package}' not found. Installing...")
+        try:
+            subprocess.check_call([sys.executable, "-m", "pip", "install", package])
+            logger.info(f"Package '{package}' installed successfully.")
+        except Exception as e:
+            logger.error(f"Failed to install package '{package}': {e}")
+            sys.exit(1)
+
+try:
+    import paho.mqtt.client as mqtt
+    from influxdb import InfluxDBClient
+except ImportError as e:
+    logger.error(f"Import error: {e}")
+    sys.exit(1)
 
 # Function to get the MAC address of the device
 def get_mac_address():
@@ -35,11 +59,11 @@ TRIGGER_TOPIC = f"speedtest/pi/{mac_address}/trigger"
 ALL_TOPICS = TRIGGER_TOPIC
 
 # InfluxDB settings
-INFLUXDB_HOST = 'speedtest.verinus.com'
+INFLUXDB_HOST = 'speedtest.verinexus.com'
 INFLUXDB_PORT = 8086
 INFLUXDB_USERNAME = ''  # Replace with your username if authentication is enabled
 INFLUXDB_PASSWORD = ''  # Replace with your password if authentication is enabled
-INFLUXDB_DATABASE = 'speedtest.db.clean'
+INFLUXDB_DATABASE = 'speedtest_db_clean'
 INFLUXDB_MEASUREMENT = 'ondemand'
 
 # Initialize InfluxDB client
@@ -54,7 +78,7 @@ try:
     logger.info("Connected to InfluxDB.")
 except Exception as e:
     logger.error(f"Failed to connect to InfluxDB: {e}")
-    exit(1)
+    sys.exit(1)
 
 # Check if database exists; if not, create it
 def check_create_database(client, dbname):
@@ -71,7 +95,12 @@ check_create_database(influxdb_client, INFLUXDB_DATABASE)
 def run_speedtest():
     logger.info("Starting speedtest...")
     try:
-        result = subprocess.run(["speedtest-cli", "--json"], capture_output=True, text=True, timeout=300)
+        result = subprocess.run(
+            ["speedtest-cli", "--json"],
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
         if result.returncode != 0:
             logger.error(f"Speedtest failed: {result.stderr}")
             return None
@@ -84,10 +113,16 @@ def run_speedtest():
         logger.error(f"Unexpected error running speedtest: {e}")
         return None
 
+    # Convert download and upload speeds to Mbps
+    speedtest_data['download_mbps'] = speedtest_data['download'] / 1_000_000  # Convert bps to Mbps
+    speedtest_data['upload_mbps'] = speedtest_data['upload'] / 1_000_000      # Convert bps to Mbps
+
     # Add additional data
     speedtest_data['mac_address'] = mac_address
-    speedtest_data['human_readable_time'] = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
-    speedtest_data['timestamp'] = int(time.time())
+    current_time = datetime.datetime.now(datetime.timezone.utc)
+    iso_time = current_time.isoformat()
+    speedtest_data['human_readable_time'] = iso_time
+    speedtest_data['timestamp'] = int(current_time.timestamp())
     return speedtest_data
 
 # Function to write data to InfluxDB
@@ -108,8 +143,8 @@ def write_to_influxdb(data):
         },
         "fields": {
             "field_mac_address": data['mac_address'],
-            "field_download": data['download'],
-            "field_upload": data['upload'],
+            "field_download": data['download_mbps'],
+            "field_upload": data['upload_mbps'],
             "field_ping": data['ping'],
             "field_timestamp": data['timestamp'],
             "field_human_readable_time": data['human_readable_time'],
@@ -117,7 +152,7 @@ def write_to_influxdb(data):
             "field_server_distance": float(data['server']['d']),
             "field_server_latency": data['server']['latency']
         },
-        "time": data['timestamp'] * 1_000_000_000  # Convert to nanoseconds
+        "time": int(data['timestamp'] * 1e9)  # Convert to nanoseconds
     }
 
     # Write to InfluxDB
@@ -141,6 +176,17 @@ def on_message(client, userdata, msg):
                 # Write the results to InfluxDB
                 write_to_influxdb(speedtest_result)
                 logger.info("Speedtest results stored in InfluxDB.")
+
+                # Output results to UI
+                print("\nSpeedtest Results:")
+                print(f"Download Speed: {speedtest_result['download_mbps']:.2f} Mbps")
+                print(f"Upload Speed  : {speedtest_result['upload_mbps']:.2f} Mbps")
+                print(f"Latency       : {speedtest_result['ping']} ms")
+                print(f"MAC Address   : {speedtest_result['mac_address']}")
+                print(f"Test DateTime : {speedtest_result['human_readable_time']}")
+                print(f"Test Server   : {speedtest_result['server']['name']}\n")
+
+                logger.info("Returning to MQTT client loop.")
             else:
                 logger.error("No speedtest results to store.")
         else:
@@ -158,7 +204,7 @@ try:
     logger.info(f"Subscribed to topic {ALL_TOPICS}")
 except Exception as e:
     logger.error(f"Failed to connect to MQTT Broker: {e}")
-    exit(1)
+    sys.exit(1)
 
 # Start the MQTT client loop to listen for messages
 logger.info("Starting MQTT client loop...")
