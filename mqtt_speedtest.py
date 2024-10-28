@@ -7,9 +7,10 @@ import uuid
 import logging
 import time
 import datetime
+import importlib.util
 
 # Version number
-VERSION = "1.0.4"
+VERSION = "1.0.6"
 FILENAME = "mqtt_speedtest.py"
 
 # Set up logging for full debugging and progress information
@@ -21,23 +22,29 @@ logger = logging.getLogger(FILENAME)
 
 # Dependency check and installation
 required_packages = ['paho-mqtt', 'influxdb']
+missing_packages = []
+
 for package in required_packages:
+    package_name = package.replace('-', '_')
+    spec = importlib.util.find_spec(package_name)
+    if spec is None:
+        missing_packages.append(package)
+        logger.warning(f"Package '{package}' not found. Will attempt to install.")
+
+if missing_packages:
+    logger.info(f"Installing missing packages: {', '.join(missing_packages)}")
     try:
-        __import__(package.replace('-', '_'))
-    except ImportError:
-        logger.warning(f"Package '{package}' not found. Installing...")
-        try:
-            subprocess.check_call([sys.executable, "-m", "pip", "install", package])
-            logger.info(f"Package '{package}' installed successfully.")
-        except Exception as e:
-            logger.error(f"Failed to install package '{package}': {e}")
-            sys.exit(1)
+        subprocess.check_call([sys.executable, "-m", "pip", "install", *missing_packages])
+        logger.info("Missing packages installed successfully.")
+    except Exception as e:
+        logger.error(f"Failed to install packages: {e}")
+        sys.exit(1)
 
 try:
     import paho.mqtt.client as mqtt
     from influxdb import InfluxDBClient
 except ImportError as e:
-    logger.error(f"Import error: {e}")
+    logger.error(f"Import error after installation attempt: {e}")
     sys.exit(1)
 
 # Function to get the MAC address of the device
@@ -53,6 +60,8 @@ logger.info(f"MAC Address: {mac_address}")
 # Define the MQTT broker details
 MQTT_BROKER = "dashboard.verinexus.com"
 MQTT_PORT = 1883
+MQTT_USERNAME = 'mqttuser'  # Set your MQTT username
+MQTT_PASSWORD = 'Yky5n6FWia0NWQ'  # Set your MQTT password
 
 # Define the topics
 TRIGGER_TOPIC = f"speedtest/pi/{mac_address}/trigger"
@@ -231,23 +240,9 @@ def on_message(client, userdata, msg):
 
 # Initialize the MQTT client
 client = mqtt.Client()
+client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
 client.on_message = on_message
 
 # Connect to the broker and subscribe to the trigger topic
 try:
-    logger.info(f"Connecting to MQTT Broker at {MQTT_BROKER}:{MQTT_PORT}")
-    client.connect(MQTT_BROKER, MQTT_PORT, 60)
-    client.subscribe(ALL_TOPICS)
-    logger.info(f"Subscribed to topic {ALL_TOPICS}")
-except Exception as e:
-    logger.error(f"Failed to connect to MQTT Broker: {e}")
-    sys.exit(1)
-
-# Start the MQTT client loop to listen for messages
-logger.info("Starting MQTT client loop...")
-try:
-    client.loop_forever()
-except KeyboardInterrupt:
-    logger.info("MQTT client loop interrupted by user.")
-except Exception as e:
-    logger.error(f"Unexpected error in MQTT client loop: {e}")
+    logger.info(f"Connecting to MQTT Broker at
