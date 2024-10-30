@@ -1,6 +1,6 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 2.7.4
+# Version: 2.8.0
 # Date: 30/10/2024
 
 # Description:
@@ -8,7 +8,7 @@
 # It uploads the results to an InfluxDB server for monitoring.
 
 # Version number of the script
-SCRIPT_VERSION="2.7.4"
+SCRIPT_VERSION="2.8.0"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -21,8 +21,6 @@ MAX_LOG_SIZE=5242880  # 5MB
 INFLUXDB_SERVER="http://82.165.7.116:8086"
 INFLUXDB_DB="speedtest_db_clean"
 INFLUXDB_MEASUREMENT="speedtest"
-INFLUXDB_TEST_DB="test_db"
-INFLUXDB_TEST_MEASUREMENT="endpoints"
 
 # ANSI Color Codes
 RED='\033[0;31m'
@@ -146,53 +144,6 @@ ensure_wrapper_script() {
     fi
 }
 
-# Function to perform DNS resolution tests
-perform_dns_tests() {
-    local dns_server=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | head -n 1)
-    if [ -z "$dns_server" ]; then
-        log_message "ERROR" "No DNS server found in /etc/resolv.conf."
-        return
-    fi
-
-    local domains=("example.com" "google.com" "github.com")
-    for domain in "${domains[@]}"; do
-        local start_time=$(date +%s%N)
-        local dns_result=$(dig @$dns_server $domain +short)
-        local end_time=$(date +%s%N)
-        local dns_time=$((($end_time - $start_time) / 1000000))  # Convert to milliseconds
-        if [ -z "$dns_result" ]; then
-            dns_time="0"
-            log_message "WARN" "DNS resolution failed for $domain."
-        fi
-        # Add the DNS resolution time to the InfluxDB data
-        INFLUXDB_DATA="$INFLUXDB_DATA,field_dns_${domain//./_}=$dns_time"
-    done
-}
-
-# Function to perform ping tests
-perform_ping_tests() {
-    local endpoints=$(curl -s -G "$INFLUXDB_SERVER/query" --data-urlencode "db=$INFLUXDB_TEST_DB" --data-urlencode "q=SHOW TAG VALUES FROM \"$INFLUXDB_TEST_MEASUREMENT\" WITH KEY = \"tag_endpoint\"")
-
-    local endpoint_list=$(echo "$endpoints" | jq -r '.results[0].series[0].values[][1] // empty' 2>/dev/null)
-
-    if [ -z "$endpoint_list" ]; then
-        echo -e "${YELLOW}No endpoints found in the test database.${NC}"
-        log_message "WARN" "No endpoints found in the test database."
-        return
-    fi
-
-    for endpoint in $endpoint_list; do
-        local ping_command="ping -c 1 -s 20 $endpoint"
-        local ping_result=$($ping_command | grep 'time=' | awk -F'time=' '{print $2}' | awk '{print $1}')
-        if ! [[ $ping_result =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-            ping_result="0"
-            log_message "WARN" "Ping failed for $endpoint."
-        fi
-        # Add the ping result to the InfluxDB data
-        INFLUXDB_DATA="$INFLUXDB_DATA,field_ping_${endpoint//./_}=$ping_result"
-    done
-}
-
 # Function to create database if it doesn't exist
 create_database_if_not_exists() {
     local db_name=$1
@@ -200,9 +151,6 @@ create_database_if_not_exists() {
     if ! echo "$databases" | grep -q "\"$db_name\""; then
         curl -s -XPOST "$INFLUXDB_SERVER/query" --data-urlencode "q=CREATE DATABASE $db_name" >/dev/null 2>&1
         log_message "INFO" "Created InfluxDB database: $db_name"
-        # Add example.com entry in the correct format
-        local test_data="endpoints,tag_endpoint=example.com field_value=1i"
-        curl -s -XPOST "$INFLUXDB_SERVER/write?db=$db_name" --data-binary "$test_data" >/dev/null 2>&1
     fi
 }
 
@@ -385,25 +333,14 @@ SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
 SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
 echo -e "${CHECKMARK}${GREEN}Shareable ID: $SHARE_ID${NC}"
 
-# Prepare InfluxDB data before calling DNS and ping tests
-INFLUXDB_DATA="speedtest,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$(hostname),tag_location=\"$LOCATION\" field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\""
+# Prepare InfluxDB data
+INFLUXDB_DATA="speedtest,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$(hostname),tag_location=$LOCATION field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\""
 
-# Step 7: Performing DNS Resolution Tests
-echo -e "${CYAN}Step 7: Performing DNS Resolution Tests...${NC}"
-perform_dns_tests
-echo -e "${CHECKMARK}${GREEN} DNS Resolution Tests completed.${NC}"
-
-# Step 8: Performing Ping Tests
-echo -e "${CYAN}Step 8: Performing Ping Tests...${NC}"
-perform_ping_tests
-echo -e "${CHECKMARK}${GREEN} Ping Tests completed.${NC}"
-
-# Ensure the databases exist
+# Ensure the database exists
 create_database_if_not_exists "$INFLUXDB_DB"
-create_database_if_not_exists "$INFLUXDB_TEST_DB"
 
-# Step 9: Sending data to InfluxDB
-echo -ne "${CYAN}Step 9: Saving Results to InfluxDB... "
+# Step 7: Sending data to InfluxDB
+echo -ne "${CYAN}Step 7: Saving Results to InfluxDB... "
 curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$INFLUXDB_DATA"
 echo -e "${CHECKMARK}${GREEN}Data successfully saved to InfluxDB.${NC}"
 log_message "INFO" "Data saved to InfluxDB database $INFLUXDB_DB."
