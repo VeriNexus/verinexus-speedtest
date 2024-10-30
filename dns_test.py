@@ -45,12 +45,10 @@ read_endpoints_from_influx() {
     print_progress "Reading DNS servers and FQDNs from InfluxDB..."
 
     # Query InfluxDB for DNS servers
-    DNS_SERVERS=$(curl -s "$INFLUXDB_URL/query?db=$DATABASE" --data-urlencode "q=SELECT DISTINCT(\"field_endpoint\") FROM \"endpoints\" WHERE \"tag_check_dns_server\"='true' AND
- \"tag_type\"='IP'" | jq -r '.results[0].series[0].values[][1]' 2>/dev/null)
+    DNS_SERVERS=$(curl -s "$INFLUXDB_URL/query?db=$DATABASE" --data-urlencode "q=SELECT DISTINCT(\"field_endpoint\") FROM \"endpoints\" WHERE \"field_check_dns_server\"=true AND \"tag_type\"='IP'" | jq -r '.results[0].series[0].values[][1]' 2>/dev/null)
 
     # Query InfluxDB for FQDNs to resolve
-    FQDNS=$(curl -s "$INFLUXDB_URL/query?db=$DATABASE" --data-urlencode "q=SELECT DISTINCT(\"field_endpoint\") FROM \"endpoints\" WHERE \"tag_check_name_resolution\"='true' AND 
-\"tag_type\"='FQDN'" | jq -r '.results[0].series[0].values[][1]' 2>/dev/null)
+    FQDNS=$(curl -s "$INFLUXDB_URL/query?db=$DATABASE" --data-urlencode "q=SELECT DISTINCT(\"field_endpoint\") FROM \"endpoints\" WHERE \"field_check_name_resolution\"=true AND \"tag_type\"='FQDN'" | jq -r '.results[0].series[0].values[][1]' 2>/dev/null)
     
     # Validate the extracted values
     if [[ -z "$DNS_SERVERS" ]]; then
@@ -128,8 +126,7 @@ write_to_influxdb() {
     local mac_address=$7
 
     # Compose InfluxDB line protocol data
-    data="$MEASUREMENT,tag_dns_server=$DNS_SERVER,tag_fqdn=$FQDN,tag_test_id=$test_id,tag_mac=$mac_address field_status=\"$status\",field_total_time=$total_time,field_query_time
-=$query_time,field_authority=\"$authority_status\""
+    data="$MEASUREMENT,tag_dns_server=$DNS_SERVER,tag_fqdn=$FQDN,tag_test_id=$test_id,tag_mac=$mac_address field_status=\"$status\",field_total_time=$total_time,field_query_time=$query_time,field_authority=\"$authority_status\""
 
     if [[ "$status" == "fail" ]]; then
         data+=",field_error_message=\"$error_message\""
