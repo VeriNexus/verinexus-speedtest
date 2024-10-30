@@ -1,14 +1,14 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 2.7.3
-# Date: 23/10/2024
+# Version: 2.7.4
+# Date: 30/10/2024
 
 # Description:
 # This script performs a speed test and collects various network metrics.
 # It uploads the results to an InfluxDB server for monitoring.
 
 # Version number of the script
-SCRIPT_VERSION="2.7.3"
+SCRIPT_VERSION="2.7.4"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -344,9 +344,14 @@ echo -e "${CHECKMARK}${GREEN}Private IP: $PRIVATE_IP, Public IP: $PUBLIC_IP${NC}
 
 # Step 4: Fetching MAC Address and LAN IP
 echo -ne "${CYAN}Step 4: Fetching MAC Address and LAN IP... "
-ACTIVE_IFACE=$(ip route | grep default | awk '{print $5}')
+ACTIVE_IFACE=$(ip route | grep '^default' | awk '{print $5}' | head -n1)
 if [ -n "$ACTIVE_IFACE" ]; then
-    MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
+    if [ -f "/sys/class/net/$ACTIVE_IFACE/address" ]; then
+        MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
+    else
+        MAC_ADDRESS="N/A"
+        log_message "ERROR" "MAC address file not found for interface $ACTIVE_IFACE."
+    fi
     LAN_IP=$(ip addr show $ACTIVE_IFACE | grep "inet " | awk '{print $2}' | cut -d/ -f1)
 else
     log_message "ERROR" "Could not determine active network interface."
@@ -381,7 +386,7 @@ SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
 echo -e "${CHECKMARK}${GREEN}Shareable ID: $SHARE_ID${NC}"
 
 # Prepare InfluxDB data before calling DNS and ping tests
-INFLUXDB_DATA="speedtest,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$(hostname),tag_location=$LOCATION field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\""
+INFLUXDB_DATA="speedtest,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$(hostname),tag_location=\"$LOCATION\" field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\""
 
 # Step 7: Performing DNS Resolution Tests
 echo -e "${CYAN}Step 7: Performing DNS Resolution Tests...${NC}"
