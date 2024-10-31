@@ -1,6 +1,6 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 2.9.1
+# Version: 2.9.2
 # Date: 31/10/2024
 
 # Description:
@@ -8,7 +8,7 @@
 # It uploads the results to an InfluxDB server for monitoring.
 
 # Version number of the script
-SCRIPT_VERSION="2.9.1"
+SCRIPT_VERSION="2.9.2"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -185,7 +185,7 @@ apply_forced_errors() {
             rm -f "$FORCED_ERROR_FILE"
             log_message "INFO" "Deleted local copy of forced error file."
         fi
-    fi
+    }
 }
 
 # Function to update crontab by downloading and running update_crontab.sh
@@ -325,7 +325,11 @@ if [ -n "$SPEEDTEST_OUTPUT" ]; then
     ISP=$(echo "$SPEEDTEST_OUTPUT" | jq -r '.client.isp')
     PUBLIC_IP=$(echo "$SPEEDTEST_OUTPUT" | jq -r '.client.ip')
     SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | jq -r '.share')
-    SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
+    if [ -n "$SHARE_URL" ] && [ "$SHARE_URL" != "null" ]; then
+        SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
+    else
+        SHARE_ID="N/A"
+    fi
 else
     log_message "ERROR" "No output from speedtest-cli."
     DOWNLOAD_SPEED="0.00"
@@ -358,13 +362,49 @@ ESCAPED_LAN_IP=$(echo "$LAN_IP" | sed 's/"/\\"/g')
 ESCAPED_UK_DATE=$(echo "$UK_DATE" | sed 's/"/\\"/g')
 ESCAPED_UK_TIME=$(echo "$UK_TIME" | sed 's/"/\\"/g')
 ESCAPED_SERVER_NAME=$(echo "$SERVER_NAME" | sed 's/"/\\"/g')
-ESCAPED_SHARE_ID=$(echo "$SHARE_ID" | sed 's/"/\\"/g')
 ESCAPED_SCRIPT_VERSION=$(echo "$SCRIPT_VERSION" | sed 's/"/\\"/g')
 
-INFLUXDB_DATA="$INFLUXDB_MEASUREMENT,tag_mac_address=$ESCAPED_MAC_ADDRESS,tag_server_id=$ESCAPED_SERVER_ID,tag_public_ip=$ESCAPED_PUBLIC_IP,tag_hostname=$ESCAPED_HOSTNAME,tag_location=$ESCAPED_LOCATION,tag_isp=$ESCAPED_ISP field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$ESCAPED_LAN_IP\",field_date=\"$ESCAPED_UK_DATE\",field_time=\"$ESCAPED_UK_TIME\",field_server_name=\"$ESCAPED_SERVER_NAME\",field_share_id=\"$ESCAPED_SHARE_ID\",field_script_version=\"$ESCAPED_SCRIPT_VERSION\""
+# Initialize InfluxDB data
+INFLUXDB_DATA="$INFLUXDB_MEASUREMENT"
+
+# Prepare tags
+TAGS=""
+[ -n "$ESCAPED_MAC_ADDRESS" ] && TAGS+=",tag_mac_address=$ESCAPED_MAC_ADDRESS"
+[ -n "$ESCAPED_SERVER_ID" ] && TAGS+=",tag_server_id=$ESCAPED_SERVER_ID"
+[ -n "$ESCAPED_PUBLIC_IP" ] && TAGS+=",tag_public_ip=$ESCAPED_PUBLIC_IP"
+[ -n "$ESCAPED_HOSTNAME" ] && TAGS+=",tag_hostname=$ESCAPED_HOSTNAME"
+[ -n "$ESCAPED_LOCATION" ] && TAGS+=",tag_location=$ESCAPED_LOCATION"
+[ -n "$ESCAPED_ISP" ] && TAGS+=",tag_isp=$ESCAPED_ISP"
+
+# Append tags to InfluxDB data
+INFLUXDB_DATA+="$TAGS"
+
+# Prepare fields
+FIELDS=""
+[ -n "$LATENCY" ] && FIELDS+="field_latency=$LATENCY"
+[ -n "$DOWNLOAD_SPEED" ] && FIELDS+=",field_download_speed=$DOWNLOAD_SPEED"
+[ -n "$UPLOAD_SPEED" ] && FIELDS+=",field_upload_speed=$UPLOAD_SPEED"
+[ -n "$ESCAPED_LAN_IP" ] && FIELDS+=",field_lan_ip=\"$ESCAPED_LAN_IP\""
+[ -n "$ESCAPED_UK_DATE" ] && FIELDS+=",field_date=\"$ESCAPED_UK_DATE\""
+[ -n "$ESCAPED_UK_TIME" ] && FIELDS+=",field_time=\"$ESCAPED_UK_TIME\""
+[ -n "$ESCAPED_SERVER_NAME" ] && FIELDS+=",field_server_name=\"$ESCAPED_SERVER_NAME\""
+[ -n "$SHARE_ID" ] && FIELDS+=",field_share_id=$SHARE_ID"
+[ -n "$ESCAPED_SCRIPT_VERSION" ] && FIELDS+=",field_script_version=\"$ESCAPED_SCRIPT_VERSION\""
+
+# Remove leading comma if necessary
+FIELDS=$(echo "$FIELDS" | sed 's/^,//')
+
+# Append fields to InfluxDB data
+INFLUXDB_DATA+=" $FIELDS"
 
 # Ensure the database exists
 create_database_if_not_exists "$INFLUXDB_DB"
+
+# Get current timestamp in nanoseconds
+CURRENT_TIME=$(date +%s%N)
+
+# Append timestamp to InfluxDB data
+INFLUXDB_DATA+=" $CURRENT_TIME"
 
 # Step 7: Sending data to InfluxDB
 echo -ne "${CYAN}Step 7: Saving Results to InfluxDB... "
