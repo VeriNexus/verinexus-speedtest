@@ -1,6 +1,6 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 2.9.7
+# Version: 2.9.8
 # Date: 31/10/2024
 
 # Description:
@@ -9,7 +9,7 @@
 # Now includes ISP information retrieved from an external API.
 
 # Version number of the script
-SCRIPT_VERSION="2.9.7"
+SCRIPT_VERSION="2.9.8"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -21,7 +21,7 @@ MAX_LOG_SIZE=5242880  # 5MB
 # InfluxDB Configuration
 INFLUXDB_SERVER="http://82.165.7.116:8086"
 INFLUXDB_DB="speedtest_db_clean"
-INFLUXDB_MEASUREMENT="speedtest1"
+INFLUXDB_MEASUREMENT="speedtest"
 
 # ANSI Color Codes
 RED='\033[0;31m'
