@@ -1,14 +1,15 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 2.9.3
+# Version: 2.8.1
 # Date: 31/10/2024
 
 # Description:
 # This script performs a speed test and collects various network metrics.
 # It uploads the results to an InfluxDB server for monitoring.
+# Now includes ISP information retrieved from an external API.
 
 # Version number of the script
-SCRIPT_VERSION="2.9.3"
+SCRIPT_VERSION="2.9.5"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -59,11 +60,6 @@ log_message() {
     else
         echo "$timestamp [$hostname] [Version $script_version] [UNKNOWN]: $message" >> "$LOG_FILE"
     fi
-}
-
-# Function to escape tag values for InfluxDB line protocol
-escape_tag_value() {
-    echo "$1" | sed 's/ /\\ /g; s/,/\\,/g; s/=/\\=/g'
 }
 
 # Rotate log file at the start
@@ -226,8 +222,8 @@ run_speed_test() {
     local max_attempts=3
     while [ $attempts -lt $max_attempts ]; do
         echo -e "${BLUE}Attempting speed test (Attempt $((attempts+1)) of $max_attempts)...${NC}"
-        SPEEDTEST_OUTPUT=$(speedtest-cli --json)
-        if [ $? -eq 0 ] && [ -n "$SPEEDTEST_OUTPUT" ]; then
+        SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
+        if [ $? -eq 0 ]; then
             echo -e "${CHECKMARK} Speed Test completed successfully."
             log_message "INFO" "Speed Test completed successfully."
             break
@@ -243,6 +239,11 @@ run_speed_test() {
         return 1  # Fail if all attempts failed
     fi
     return 0
+}
+
+# Function to escape tag values for InfluxDB line protocol
+escape_tag_value() {
+    echo "$1" | sed 's/ /\\ /g; s/,/\\,/g; s/=/\\=/g'
 }
 
 # Ensure the wrapper script exists before updating crontab
@@ -313,40 +314,41 @@ else
 fi
 echo -e "${CHECKMARK}${GREEN}MAC Address: $MAC_ADDRESS, LAN IP: $LAN_IP${NC}"
 
-# Step 5: Extracting the relevant fields from JSON output
+# Step 5: Extracting the relevant fields
 echo -ne "${CYAN}Step 5: Extracting Speed Test Results... "
-if [ -n "$SPEEDTEST_OUTPUT" ]; then
-    DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | jq '.download' | awk '{printf "%.2f", $1 / 1000000}')  # Convert from bps to Mbps
-    UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | jq '.upload' | awk '{printf "%.2f", $1 / 1000000}')      # Convert from bps to Mbps
-    LATENCY=$(echo "$SPEEDTEST_OUTPUT" | jq '.ping')
-    SERVER_ID=$(echo "$SPEEDTEST_OUTPUT" | jq '.server.id')
-    SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | jq -r '.server.name')
-    LOCATION=$(echo "$SPEEDTEST_OUTPUT" | jq -r '.server.location')
-    ISP=$(echo "$SPEEDTEST_OUTPUT" | jq -r '.client.isp')
-    PUBLIC_IP=$(echo "$SPEEDTEST_OUTPUT" | jq -r '.client.ip')
-    SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | jq -r '.share')
-    if [ -n "$SHARE_URL" ] && [ "$SHARE_URL" != "null" ]; then
-        SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
-    else
-        SHARE_ID="N/A"
-    fi
-else
-    log_message "ERROR" "No output from speedtest-cli."
+SERVER_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
+SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}' | sed 's/\"//g') # Remove quotes
+LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}' | sed 's/\"//g')    # Remove quotes
+LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')   # Latency is in field 6
+DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $7 / 1000000}')  # Convert download speed from bps to Mbps
+UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $8 / 1000000}')    # Convert upload speed from bps to Mbps
+PUBLIC_IP=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $10}')
+
+if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" || -z "$LATENCY" || -z "$PUBLIC_IP" ]]; then
+    log_message "ERROR" "Speed Test did not return valid data."
     DOWNLOAD_SPEED="0.00"
     UPLOAD_SPEED="0.00"
     LATENCY="0.00"
-    SERVER_ID="N/A"
-    SERVER_NAME="N/A"
-    LOCATION="N/A"
-    ISP="N/A"
     PUBLIC_IP="N/A"
-    SHARE_ID="N/A"
 fi
 echo -e "${CHECKMARK}${GREEN}Download: $DOWNLOAD_SPEED Mbps, Upload: $UPLOAD_SPEED Mbps, Latency: $LATENCY ms${NC}"
 
 # Step 6: Fetching ISP Information
 echo -ne "${CYAN}Step 6: Fetching ISP Information... "
-echo -e "${CHECKMARK}${GREEN}ISP: $ISP${NC}"
+ISP=$(curl -s http://ip-api.com/json/ | jq -r '.isp')
+if [ -n "$ISP" ] && [ "$ISP" != "null" ]; then
+    echo -e "${CHECKMARK}${GREEN}ISP: $ISP${NC}"
+else
+    ISP="N/A"
+    echo -e "${CROSS}${RED}Failed to retrieve ISP information.${NC}"
+    log_message "WARN" "Failed to retrieve ISP information from ip-api.com."
+fi
+
+# Step 7: Extracting Shareable ID
+echo -ne "${CYAN}Step 7: Extracting Shareable ID... "
+SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
+SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
+echo -e "${CHECKMARK}${GREEN}Shareable ID: $SHARE_ID${NC}"
 
 # Prepare InfluxDB data
 # Escape tag values
@@ -362,6 +364,7 @@ ESCAPED_LAN_IP=$(echo "$LAN_IP" | sed 's/"/\\"/g')
 ESCAPED_UK_DATE=$(echo "$UK_DATE" | sed 's/"/\\"/g')
 ESCAPED_UK_TIME=$(echo "$UK_TIME" | sed 's/"/\\"/g')
 ESCAPED_SERVER_NAME=$(echo "$SERVER_NAME" | sed 's/"/\\"/g')
+ESCAPED_SHARE_ID=$(echo "$SHARE_ID" | sed 's/"/\\"/g')
 ESCAPED_SCRIPT_VERSION=$(echo "$SCRIPT_VERSION" | sed 's/"/\\"/g')
 
 # Initialize InfluxDB data
@@ -388,7 +391,7 @@ FIELDS=""
 [ -n "$ESCAPED_UK_DATE" ] && FIELDS+=",field_date=\"$ESCAPED_UK_DATE\""
 [ -n "$ESCAPED_UK_TIME" ] && FIELDS+=",field_time=\"$ESCAPED_UK_TIME\""
 [ -n "$ESCAPED_SERVER_NAME" ] && FIELDS+=",field_server_name=\"$ESCAPED_SERVER_NAME\""
-[ -n "$SHARE_ID" ] && FIELDS+=",field_share_id=$SHARE_ID"
+[ -n "$ESCAPED_SHARE_ID" ] && FIELDS+=",field_share_id=\"$ESCAPED_SHARE_ID\""
 [ -n "$ESCAPED_SCRIPT_VERSION" ] && FIELDS+=",field_script_version=\"$ESCAPED_SCRIPT_VERSION\""
 
 # Remove leading comma if necessary
@@ -406,8 +409,8 @@ CURRENT_TIME=$(date +%s%N)
 # Append timestamp to InfluxDB data
 INFLUXDB_DATA+=" $CURRENT_TIME"
 
-# Step 7: Sending data to InfluxDB
-echo -ne "${CYAN}Step 7: Saving Results to InfluxDB... "
+# Step 8: Sending data to InfluxDB
+echo -ne "${CYAN}Step 8: Saving Results to InfluxDB... "
 curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$INFLUXDB_DATA"
 if [ $? -eq 0 ]; then
     echo -e "${CHECKMARK}${GREEN}Data successfully saved to InfluxDB.${NC}"
