@@ -9,7 +9,7 @@
 # Now includes ISP information retrieved from an external API.
 
 # Version number of the script
-SCRIPT_VERSION="2.9.5"
+SCRIPT_VERSION="2.9.6"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
