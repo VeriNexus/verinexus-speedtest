@@ -1,6 +1,6 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 2.9.6
+# Version: 2.9.7
 # Date: 31/10/2024
 
 # Description:
@@ -9,7 +9,7 @@
 # Now includes ISP information retrieved from an external API.
 
 # Version number of the script
-SCRIPT_VERSION="2.9.6"
+SCRIPT_VERSION="2.9.7"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
