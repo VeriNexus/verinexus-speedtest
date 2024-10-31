@@ -21,7 +21,7 @@ MAX_LOG_SIZE=5242880  # 5MB
 # InfluxDB Configuration
 INFLUXDB_SERVER="http://82.165.7.116:8086"
 INFLUXDB_DB="speedtest_db_clean"
-INFLUXDB_MEASUREMENT="speedtest"
+INFLUXDB_MEASUREMENT="speedtest1"
 
 # ANSI Color Codes
 RED='\033[0;31m'
