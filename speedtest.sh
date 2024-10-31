@@ -1,6 +1,6 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 2.8.0
+# Version: 2.9.0
 # Date: 30/10/2024
 
 # Description:
@@ -8,7 +8,7 @@
 # It uploads the results to an InfluxDB server for monitoring.
 
 # Version number of the script
-SCRIPT_VERSION="2.8.0"
+SCRIPT_VERSION="2.9.0"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -221,8 +221,8 @@ run_speed_test() {
     local max_attempts=3
     while [ $attempts -lt $max_attempts ]; do
         echo -e "${BLUE}Attempting speed test (Attempt $((attempts+1)) of $max_attempts)...${NC}"
-        SPEEDTEST_OUTPUT=$(speedtest-cli --csv --secure --share)
-        if [ $? -eq 0 ]; then
+        SPEEDTEST_OUTPUT=$(speedtest-cli --json)
+        if [ $? -eq 0 ] && [ -n "$SPEEDTEST_OUTPUT" ]; then
             echo -e "${CHECKMARK} Speed Test completed successfully."
             log_message "INFO" "Speed Test completed successfully."
             break
@@ -308,33 +308,39 @@ else
 fi
 echo -e "${CHECKMARK}${GREEN}MAC Address: $MAC_ADDRESS, LAN IP: $LAN_IP${NC}"
 
-# Step 5: Extracting the relevant fields
+# Step 5: Extracting the relevant fields from JSON output
 echo -ne "${CYAN}Step 5: Extracting Speed Test Results... "
-SERVER_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
-SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}' | sed 's/\"//g') # Remove quotes
-LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}' | sed 's/\"//g')    # Remove quotes
-LATENCY=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $6}')   # Latency is in field 6
-DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $7 / 1000000}')  # Convert download speed from bps to Mbps
-UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{printf "%.2f", $8 / 1000000}')    # Convert upload speed from bps to Mbps
-PUBLIC_IP=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $10}')
-
-if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" || -z "$LATENCY" || -z "$PUBLIC_IP" ]]; then
-    log_message "ERROR" "Speed Test did not return valid data."
+if [ -n "$SPEEDTEST_OUTPUT" ]; then
+    DOWNLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | jq '.download' | awk '{printf "%.2f", $1 / 1000000}')  # Convert from bps to Mbps
+    UPLOAD_SPEED=$(echo "$SPEEDTEST_OUTPUT" | jq '.upload' | awk '{printf "%.2f", $1 / 1000000}')      # Convert from bps to Mbps
+    LATENCY=$(echo "$SPEEDTEST_OUTPUT" | jq '.ping')
+    SERVER_ID=$(echo "$SPEEDTEST_OUTPUT" | jq '.server.id')
+    SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | jq -r '.server.name')
+    LOCATION=$(echo "$SPEEDTEST_OUTPUT" | jq -r '.server.location')
+    ISP=$(echo "$SPEEDTEST_OUTPUT" | jq -r '.client.isp')
+    PUBLIC_IP=$(echo "$SPEEDTEST_OUTPUT" | jq -r '.client.ip')
+    SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | jq -r '.share')
+    SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
+else
+    log_message "ERROR" "No output from speedtest-cli."
     DOWNLOAD_SPEED="0.00"
     UPLOAD_SPEED="0.00"
     LATENCY="0.00"
+    SERVER_ID="N/A"
+    SERVER_NAME="N/A"
+    LOCATION="N/A"
+    ISP="N/A"
     PUBLIC_IP="N/A"
+    SHARE_ID="N/A"
 fi
 echo -e "${CHECKMARK}${GREEN}Download: $DOWNLOAD_SPEED Mbps, Upload: $UPLOAD_SPEED Mbps, Latency: $LATENCY ms${NC}"
 
-# Step 6: Extracting Shareable ID
-echo -ne "${CYAN}Step 6: Extracting Shareable ID... "
-SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
-SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
-echo -e "${CHECKMARK}${GREEN}Shareable ID: $SHARE_ID${NC}"
+# Step 6: Displaying ISP
+echo -e "${CYAN}Step 6: Fetching ISP Information...${NC}"
+echo -e "${CHECKMARK}${GREEN}ISP: $ISP${NC}"
 
 # Prepare InfluxDB data
-INFLUXDB_DATA="speedtest,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$(hostname),tag_location=$LOCATION field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\""
+INFLUXDB_DATA="$INFLUXDB_MEASUREMENT,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$(hostname),tag_location=\"$LOCATION\",tag_isp=\"$ISP\" field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\",field_script_version=\"$SCRIPT_VERSION\""
 
 # Ensure the database exists
 create_database_if_not_exists "$INFLUXDB_DB"
@@ -349,6 +355,7 @@ log_message "INFO" "Data saved to InfluxDB database $INFLUXDB_DB."
 echo -e "${CYAN}====================================================${NC}"
 echo -e "${BOLD}VeriNexus Speed Test Completed Successfully!${NC}"
 echo -e "${CYAN}====================================================${NC}"
+echo -e "${GREEN}ISP: $ISP${NC}"
 
 # Exit script
 exit 0
