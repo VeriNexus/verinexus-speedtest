@@ -1,6 +1,6 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 2.9.2
+# Version: 2.9.3
 # Date: 31/10/2024
 
 # Description:
@@ -8,7 +8,7 @@
 # It uploads the results to an InfluxDB server for monitoring.
 
 # Version number of the script
-SCRIPT_VERSION="2.9.2"
+SCRIPT_VERSION="2.9.3"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -185,7 +185,7 @@ apply_forced_errors() {
             rm -f "$FORCED_ERROR_FILE"
             log_message "INFO" "Deleted local copy of forced error file."
         fi
-    }
+    fi
 }
 
 # Function to update crontab by downloading and running update_crontab.sh
