@@ -1,14 +1,14 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 2.9.0
-# Date: 30/10/2024
+# Version: 2.9.1
+# Date: 31/10/2024
 
 # Description:
 # This script performs a speed test and collects various network metrics.
 # It uploads the results to an InfluxDB server for monitoring.
 
 # Version number of the script
-SCRIPT_VERSION="2.9.0"
+SCRIPT_VERSION="2.9.1"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -59,6 +59,11 @@ log_message() {
     else
         echo "$timestamp [$hostname] [Version $script_version] [UNKNOWN]: $message" >> "$LOG_FILE"
     fi
+}
+
+# Function to escape tag values for InfluxDB line protocol
+escape_tag_value() {
+    echo "$1" | sed 's/ /\\ /g; s/,/\\,/g; s/=/\\=/g'
 }
 
 # Rotate log file at the start
@@ -335,12 +340,28 @@ else
 fi
 echo -e "${CHECKMARK}${GREEN}Download: $DOWNLOAD_SPEED Mbps, Upload: $UPLOAD_SPEED Mbps, Latency: $LATENCY ms${NC}"
 
-# Step 6: Displaying ISP
-echo -e "${CYAN}Step 6: Fetching ISP Information...${NC}"
+# Step 6: Fetching ISP Information
+echo -ne "${CYAN}Step 6: Fetching ISP Information... "
 echo -e "${CHECKMARK}${GREEN}ISP: $ISP${NC}"
 
 # Prepare InfluxDB data
-INFLUXDB_DATA="$INFLUXDB_MEASUREMENT,tag_mac_address=$MAC_ADDRESS,tag_server_id=$SERVER_ID,tag_public_ip=$PUBLIC_IP,tag_hostname=$(hostname),tag_location=\"$LOCATION\",tag_isp=\"$ISP\" field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$LAN_IP\",field_date=\"$UK_DATE\",field_time=\"$UK_TIME\",field_server_name=\"$SERVER_NAME\",field_share_id=\"$SHARE_ID\",field_script_version=\"$SCRIPT_VERSION\""
+# Escape tag values
+ESCAPED_MAC_ADDRESS=$(escape_tag_value "$MAC_ADDRESS")
+ESCAPED_SERVER_ID=$(escape_tag_value "$SERVER_ID")
+ESCAPED_PUBLIC_IP=$(escape_tag_value "$PUBLIC_IP")
+ESCAPED_HOSTNAME=$(escape_tag_value "$(hostname)")
+ESCAPED_LOCATION=$(escape_tag_value "$LOCATION")
+ESCAPED_ISP=$(escape_tag_value "$ISP")
+
+# Ensure field string values are properly quoted and escaped
+ESCAPED_LAN_IP=$(echo "$LAN_IP" | sed 's/"/\\"/g')
+ESCAPED_UK_DATE=$(echo "$UK_DATE" | sed 's/"/\\"/g')
+ESCAPED_UK_TIME=$(echo "$UK_TIME" | sed 's/"/\\"/g')
+ESCAPED_SERVER_NAME=$(echo "$SERVER_NAME" | sed 's/"/\\"/g')
+ESCAPED_SHARE_ID=$(echo "$SHARE_ID" | sed 's/"/\\"/g')
+ESCAPED_SCRIPT_VERSION=$(echo "$SCRIPT_VERSION" | sed 's/"/\\"/g')
+
+INFLUXDB_DATA="$INFLUXDB_MEASUREMENT,tag_mac_address=$ESCAPED_MAC_ADDRESS,tag_server_id=$ESCAPED_SERVER_ID,tag_public_ip=$ESCAPED_PUBLIC_IP,tag_hostname=$ESCAPED_HOSTNAME,tag_location=$ESCAPED_LOCATION,tag_isp=$ESCAPED_ISP field_latency=$LATENCY,field_download_speed=$DOWNLOAD_SPEED,field_upload_speed=$UPLOAD_SPEED,field_lan_ip=\"$ESCAPED_LAN_IP\",field_date=\"$ESCAPED_UK_DATE\",field_time=\"$ESCAPED_UK_TIME\",field_server_name=\"$ESCAPED_SERVER_NAME\",field_share_id=\"$ESCAPED_SHARE_ID\",field_script_version=\"$ESCAPED_SCRIPT_VERSION\""
 
 # Ensure the database exists
 create_database_if_not_exists "$INFLUXDB_DB"
@@ -348,14 +369,18 @@ create_database_if_not_exists "$INFLUXDB_DB"
 # Step 7: Sending data to InfluxDB
 echo -ne "${CYAN}Step 7: Saving Results to InfluxDB... "
 curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$INFLUXDB_DATA"
-echo -e "${CHECKMARK}${GREEN}Data successfully saved to InfluxDB.${NC}"
-log_message "INFO" "Data saved to InfluxDB database $INFLUXDB_DB."
+if [ $? -eq 0 ]; then
+    echo -e "${CHECKMARK}${GREEN}Data successfully saved to InfluxDB.${NC}"
+    log_message "INFO" "Data saved to InfluxDB database $INFLUXDB_DB."
+else
+    echo -e "${CROSS}${RED}Failed to save data to InfluxDB.${NC}"
+    log_message "ERROR" "Failed to save data to InfluxDB."
+fi
 
 # Footer
 echo -e "${CYAN}====================================================${NC}"
 echo -e "${BOLD}VeriNexus Speed Test Completed Successfully!${NC}"
 echo -e "${CYAN}====================================================${NC}"
-echo -e "${GREEN}ISP: $ISP${NC}"
 
 # Exit script
 exit 0
