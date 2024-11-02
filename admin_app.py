@@ -1,6 +1,6 @@
 # admin_app.py
-# Version: 1.8
-# Date: 24/10/2024
+# Version: 1.9
+# Date: 02/11/2024
 # Description:
 # Flask application for managing devices in the VeriNexus Speed Test system.
 # Provides routes for claiming and revoking devices.
@@ -144,7 +144,7 @@ def claim_device():
         customer_name = point.get('field_customer_name')
         location = point.get('field_location')
         if customer_id is not None and customer_name:
-            customer_id = str(customer_id)
+            customer_id = str(int(customer_id))  # Ensure customer_id is treated as an integer
             customers[customer_id] = customer_name
             if customer_id not in locations:
                 locations[customer_id] = set()
@@ -215,7 +215,7 @@ def claim_device_post():
                 if max_customer_id is None:
                     max_customer_id = 0
                 else:
-                    max_customer_id = float(max_customer_id)
+                    max_customer_id = int(max_customer_id)  # Ensure max_customer_id is treated as an integer
             customer_id = max_customer_id + 1
 
             # For new customer, location is always new
