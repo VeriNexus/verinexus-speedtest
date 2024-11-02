@@ -1,15 +1,18 @@
 # admin_app.py
-# Version: 1.9.1
+# Version: 1.9.2
 # Date: 02/11/2024
 # Description:
 # Flask application for managing devices in the VeriNexus Speed Test system.
 # Provides routes for claiming and revoking devices.
 # Includes enhanced debugging and logging.
 # Adjusted queries to retrieve MAC addresses from fields if necessary.
+# Updated endpoints route with new data structure and validation.
 
 import logging
 from flask import Flask, request, render_template, redirect, url_for
 from influxdb import InfluxDBClient
+import ipaddress
+import re
 
 app = Flask(__name__)
 
@@ -36,10 +39,13 @@ def create_database_if_not_exists(db_name):
             {
                 "measurement": INFLUXDB_MEASUREMENT,
                 "tags": {
-                    "tag_endpoint": "example.com"
+                    "tag_type": "FQDN"
                 },
                 "fields": {
-                    "field_value": 1
+                    "field_endpoint": "example.com",
+                    "field_check_ping": True,
+                    "field_check_name_resolution": True,
+                    "field_check_dns_server": True
                 }
             }
         ]
@@ -52,7 +58,7 @@ client.switch_database(INFLUXDB_DB)  # Switch to the correct database
 
 @app.route('/')
 def index():
-    query = f'SELECT * FROM {INFLUXDB_MEASUREMENT}'
+    query = f'SELECT * FROM "{INFLUXDB_MEASUREMENT}"'
     result = client.query(query)
     points = list(result.get_points())
     return render_template('index.html', points=points)
@@ -60,14 +66,40 @@ def index():
 @app.route('/add', methods=['POST'])
 def add_endpoint():
     endpoint = request.form['endpoint']
+    endpoint_type = request.form['endpoint_type']  # 'IP' or 'FQDN'
+    check_ping = 'check_ping' in request.form
+    check_name_resolution = 'check_name_resolution' in request.form
+    check_dns_server = 'check_dns_server' in request.form
+
+    # Validate the endpoint
+    if endpoint_type == 'IP':
+        # Validate IP address
+        try:
+            ipaddress.ip_address(endpoint)
+        except ValueError:
+            return "Invalid IP address", 400
+        # For IP addresses, name resolution is not applicable
+        check_name_resolution = False
+    elif endpoint_type == 'FQDN':
+        # Validate FQDN (simple validation)
+        fqdn_regex = r'^(?=.{1,255}$)([a-z0-9][a-z0-9\-]{0,62}\.)+[a-z]{2,}$'
+        if not re.match(fqdn_regex, endpoint, re.IGNORECASE):
+            return "Invalid FQDN", 400
+        # For FQDNs, check_dns_server might not be applicable
+    else:
+        return "Invalid endpoint type", 400
+
     json_body = [
         {
             "measurement": INFLUXDB_MEASUREMENT,
             "tags": {
-                "tag_endpoint": endpoint
+                "tag_type": endpoint_type
             },
             "fields": {
-                "field_value": 1
+                "field_endpoint": endpoint,
+                "field_check_ping": check_ping,
+                "field_check_name_resolution": check_name_resolution,
+                "field_check_dns_server": check_dns_server
             }
         }
     ]
@@ -77,7 +109,8 @@ def add_endpoint():
 @app.route('/delete', methods=['POST'])
 def delete_endpoint():
     endpoint = request.form['endpoint']
-    query = f"DELETE FROM {INFLUXDB_MEASUREMENT} WHERE \"tag_endpoint\"='{endpoint}'"
+    endpoint_type = request.form['endpoint_type']
+    query = f"DELETE FROM \"{INFLUXDB_MEASUREMENT}\" WHERE \"field_endpoint\"='{endpoint}' AND \"tag_type\"='{endpoint_type}'"
     client.query(query)
     return redirect(url_for('index'))
 
@@ -144,12 +177,12 @@ def claim_device():
         customer_name = point.get('field_customer_name')
         location = point.get('field_location')
         if customer_id is not None and customer_name:
-            customer_id = str(int(customer_id))  # Ensure customer_id is treated as an integer
-            customers[customer_id] = customer_name
-            if customer_id not in locations:
-                locations[customer_id] = set()
+            customer_id_str = str(int(customer_id))  # Ensure customer_id is treated as an integer
+            customers[customer_id_str] = customer_name
+            if customer_id_str not in locations:
+                locations[customer_id_str] = set()
             if location:
-                locations[customer_id].add(location)
+                locations[customer_id_str].add(location)
 
     # Convert sets to lists for JSON serialization
     for customer_id in locations:
@@ -176,8 +209,10 @@ def claim_device_post():
         # Handle customer
         if customer_option == 'existing':
             customer_id = request.form['existing_customer_id']
+            customer_id = float(customer_id)  # Ensure customer_id is a float for comparison
+
             # Retrieve customer_name based on customer_id
-            customer_query = f'SELECT "field_customer_name" FROM "{DEVICES_MEASUREMENT}" WHERE "field_customer_id" = \'{customer_id}\' LIMIT 1'
+            customer_query = f'SELECT "field_customer_name" FROM "{DEVICES_MEASUREMENT}" WHERE "field_customer_id" = {customer_id} LIMIT 1'
             customer_result = client.query(customer_query)
             customer_points = list(customer_result.get_points())
             if customer_points:
@@ -228,7 +263,7 @@ def claim_device_post():
             return "Error: Invalid customer option", 400
 
         # Validate that friendly_name is unique per customer
-        friendly_name_query = f'SELECT * FROM "{DEVICES_MEASUREMENT}" WHERE "field_customer_id" = \'{customer_id}\' AND "field_friendly_name" = \'{friendly_name}\''
+        friendly_name_query = f'SELECT * FROM "{DEVICES_MEASUREMENT}" WHERE "field_customer_id" = {customer_id} AND "field_friendly_name" = \'{friendly_name}\''
         friendly_name_result = client.query(friendly_name_query)
         friendly_name_points = list(friendly_name_result.get_points())
         if friendly_name_points:

@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Interface</title>
 </head>
 <body>
@@ -10,19 +9,44 @@
     <form action="/add" method="post">
         <label for="endpoint">Endpoint:</label>
         <input type="text" id="endpoint" name="endpoint" required>
+        <label for="endpoint_type">Type:</label>
+        <select id="endpoint_type" name="endpoint_type" required>
+            <option value="IP">IP</option>
+            <option value="FQDN">FQDN</option>
+        </select>
+        <br>
+        <label><input type="checkbox" name="check_ping"> Ping</label>
+        <label><input type="checkbox" name="check_name_resolution"> Name Resolution</label>
+        <label><input type="checkbox" name="check_dns_server"> DNS Server Response</label>
+        <br>
         <button type="submit">Add Endpoint</button>
     </form>
     <h2>Existing Endpoints</h2>
-    <ul>
+    <table>
+        <tr>
+            <th>Endpoint</th>
+            <th>Type</th>
+            <th>Ping</th>
+            <th>Name Resolution</th>
+            <th>DNS Server Response</th>
+            <th>Actions</th>
+        </tr>
         {% for point in points %}
-            <li>
-                {{ point['tag_endpoint'] }}
+        <tr>
+            <td>{{ point['field_endpoint'] }}</td>
+            <td>{{ point['tag_type'] }}</td>
+            <td>{{ point['field_check_ping'] }}</td>
+            <td>{{ point['field_check_name_resolution'] }}</td>
+            <td>{{ point['field_check_dns_server'] }}</td>
+            <td>
                 <form action="/delete" method="post" style="display:inline;">
-                    <input type="hidden" name="endpoint" value="{{ point['tag_endpoint'] }}">
+                    <input type="hidden" name="endpoint" value="{{ point['field_endpoint'] }}">
+                    <input type="hidden" name="endpoint_type" value="{{ point['tag_type'] }}">
                     <button type="submit">Delete</button>
                 </form>
-            </li>
+            </td>
+        </tr>
         {% endfor %}
-    </ul>
+    </table>
 </body>
 </html>
