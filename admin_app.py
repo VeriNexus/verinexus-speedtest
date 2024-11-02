@@ -1,5 +1,5 @@
 # admin_app.py
-# Version: 1.9
+# Version: 1.9.1
 # Date: 02/11/2024
 # Description:
 # Flask application for managing devices in the VeriNexus Speed Test system.
