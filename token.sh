@@ -17,13 +17,10 @@ install_if_missing "openssl"
 install_if_missing "cat"
 install_if_missing "tr"
 
-# Define the last 4 characters of each valid MAC
-MAC_SUFFIXES=("f206" "c2b8" "897f" "5362")
+# Define the last 4 characters of the remaining valid MAC
+MAC_SUFFIXES=("5362")
 
-# Encrypted PATs for each device (multi-line strings handled by echo -e)
-ENCRYPTED_PAT_f206="U2FsdGVkX18nF5H6FgkssWdWh6u9zymG73NCgh/H27PIWOfS5GIXT8X6T722L+Py\ngv7/wvmvLSBVnZSZHtFjcA=="
-ENCRYPTED_PAT_c2b8="U2FsdGVkX1/lgdmAA83FLS8SpRn9lmuB1PsEp3KMEwkFvMzAqBBpakMW6XLun6Yk\n0IQkSk3K/NllnlxKdPqXQQ=="
-ENCRYPTED_PAT_897f="U2FsdGVkX1/Ov6GGps9qX0Ft8n5MgVaEw+20w5jYAmsthVOsq4NWuuxwDrMzjbKB\n9YStB+R25/kEO6kOVUIb3g=="
+# Encrypted PAT for the remaining device (multi-line string handled by echo -e)
 ENCRYPTED_PAT_5362="U2FsdGVkX1/KealiugRB33f10HkGL8EixYI228VvkM2qVJXZszJLcNGR7iN0Msmc\naTMhTsqpcErH60LvkqZ3+A=="
 
 # Detect the primary network interface with a valid MAC address
@@ -50,14 +47,11 @@ echo "[INFO] MAC address detected: $MAC_ADDRESS"
 MAC_SUFFIX="${MAC_ADDRESS: -4}"
 echo "[INFO] MAC suffix extracted: $MAC_SUFFIX"
 
-# Check if the last 4 characters match any known suffix
+# Check if the last 4 characters match the known suffix
 if [[ " ${MAC_SUFFIXES[@]} " =~ " $MAC_SUFFIX " ]]; then
     # Select the encrypted PAT based on MAC suffix
     echo "[INFO] Authorized MAC suffix detected, selecting encrypted PAT..."
     case "$MAC_SUFFIX" in
-        "f206") ENCRYPTED_PAT="$ENCRYPTED_PAT_f206" ;;
-        "c2b8") ENCRYPTED_PAT="$ENCRYPTED_PAT_c2b8" ;;
-        "897f") ENCRYPTED_PAT="$ENCRYPTED_PAT_897f" ;;
         "5362") ENCRYPTED_PAT="$ENCRYPTED_PAT_5362" ;;
         *) echo "[ERROR] Unauthorized device. Exiting."; exit 1 ;;
     esac
