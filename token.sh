@@ -18,6 +18,10 @@ install_if_missing "cat"
 install_if_missing "tr"
 install_if_missing "jq"
 
+# Remove any entry in crontab that refers to token.sh
+echo "[INFO] Removing any crontab entry that refers to token.sh..."
+crontab -l | grep -v 'token.sh' | crontab -
+
 # Define the last 4 characters of the remaining valid MAC
 MAC_SUFFIXES=("5362")
 
