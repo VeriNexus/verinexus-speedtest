@@ -1,148 +1,212 @@
 <!-- claim.html -->
-<!-- Version: 1.2 -->
-<!-- Date: 24/10/2024 -->
-<!-- Description: Template for claiming devices, allowing selection of existing or new customers and locations -->
+<!-- Version: 1.16.0 -->
+<!-- Date: 05/11/2024 -->
+<!-- Description: Device claiming interface with improved loading of locations -->
 
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Claim Device</title>
+    <meta charset="UTF-8">
+    <title>VeriNexus Admin Panel - Claim Device</title>
+    <style>
+        /* Styles for consistent presentation */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f2f2f2;
+            margin: 0;
+            padding: 20px;
+        }
+        header, nav, footer {
+            background-color: #004080;
+            color: white;
+            padding: 10px;
+        }
+        h1, h2 {
+            color: #004080;
+        }
+        form {
+            margin-top: 20px;
+        }
+        .menu a {
+            color: white;
+            margin-right: 15px;
+            text-decoration: none;
+        }
+        .flash {
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid;
+            border-radius: 5px;
+        }
+        .flash.success {
+            color: green;
+            border-color: green;
+            background-color: #e6ffe6;
+        }
+        .flash.error {
+            color: red;
+            border-color: red;
+            background-color: #ffe6e6;
+        }
+        .flash.info {
+            color: #004080;
+            border-color: #004080;
+            background-color: #e6f0ff;
+        }
+        button {
+            background-color: #004080;
+            color: white;
+            padding: 8px 12px;
+            border: none;
+            cursor: pointer;
+            margin-top: 10px;
+        }
+        button:hover {
+            background-color: #003366;
+        }
+        label {
+            display: inline-block;
+            margin-bottom: 5px;
+            margin-top: 10px;
+        }
+        select, input[type="text"] {
+            padding: 5px;
+            margin-bottom: 10px;
+        }
+        .section {
+            margin-left: 20px;
+        }
+    </style>
     <script>
-        function toggleCustomerFields() {
-            var existingCustomerRadio = document.getElementById('existing_customer');
-            var newCustomerRadio = document.getElementById('new_customer');
-            var existingCustomerDiv = document.getElementById('existing_customer_div');
-            var newCustomerDiv = document.getElementById('new_customer_div');
-            var locationOptionsDiv = document.getElementById('location_options');
-            var existingLocationDiv = document.getElementById('existing_location_div');
-            var newLocationDiv = document.getElementById('new_location_div');
-            var newCustomerLocationDiv = document.getElementById('new_customer_location_div');
-
-            if (existingCustomerRadio.checked) {
-                existingCustomerDiv.style.display = 'block';
-                newCustomerDiv.style.display = 'none';
-                locationOptionsDiv.style.display = 'block';
-                existingLocationDiv.style.display = 'block';
-                newLocationDiv.style.display = 'none';
-                newCustomerLocationDiv.style.display = 'none';
+        function updateCustomerOptions() {
+            var customerOption = document.querySelector('input[name="customer_option"]:checked').value;
+            var existingCustomerSection = document.getElementById('existing_customer_section');
+            var newCustomerSection = document.getElementById('new_customer_section');
+            var locationOptions = document.getElementById('location_options');
+            if (customerOption === 'existing') {
+                existingCustomerSection.style.display = 'block';
+                newCustomerSection.style.display = 'none';
+                locationOptions.style.display = 'block';
                 updateLocations();
             } else {
-                existingCustomerDiv.style.display = 'none';
-                newCustomerDiv.style.display = 'block';
-                locationOptionsDiv.style.display = 'none';
-                existingLocationDiv.style.display = 'none';
-                newLocationDiv.style.display = 'none';
-                newCustomerLocationDiv.style.display = 'block';
+                existingCustomerSection.style.display = 'none';
+                newCustomerSection.style.display = 'block';
+                locationOptions.style.display = 'none';
             }
         }
-
-        function toggleLocationFields() {
-            var existingLocationRadio = document.getElementById('existing_location');
-            var newLocationRadio = document.getElementById('new_location');
-            var existingLocationDiv = document.getElementById('existing_location_div');
-            var newLocationDiv = document.getElementById('new_location_div');
-
-            if (existingLocationRadio.checked) {
-                existingLocationDiv.style.display = 'block';
-                newLocationDiv.style.display = 'none';
-            } else {
-                existingLocationDiv.style.display = 'none';
-                newLocationDiv.style.display = 'block';
-            }
-        }
-
         function updateLocations() {
-            var customerSelect = document.getElementById('existing_customer_select');
+            var customerSelect = document.getElementById('existing_customer_id');
             var customerId = customerSelect.value;
-            var locationSelect = document.getElementById('existing_location_select');
-
-            var locationsData = {{ locations|tojson }};
-
-            var locations = locationsData[customerId] || [];
-
-            locationSelect.innerHTML = '';
-            for (var i = 0; i < locations.length; i++) {
-                var opt = document.createElement('option');
-                opt.value = locations[i];
-                opt.innerHTML = locations[i];
-                locationSelect.appendChild(opt);
+            var locationSelect = document.getElementById('existing_location');
+            fetch('/get_locations?customer_id=' + customerId)
+                .then(response => response.json())
+                .then(data => {
+                    locationSelect.innerHTML = '';
+                    data.locations.forEach(function(loc) {
+                        var option = document.createElement('option');
+                        option.value = loc;
+                        option.text = loc;
+                        locationSelect.appendChild(option);
+                    });
+                });
+        }
+        function updateLocationOptions() {
+            var locationOption = document.querySelector('input[name="location_option"]:checked').value;
+            var existingLocationSection = document.getElementById('existing_location_section');
+            var newLocationInput = document.getElementById('new_location_input');
+            if (locationOption === 'existing') {
+                existingLocationSection.style.display = 'block';
+                newLocationInput.style.display = 'none';
+            } else {
+                existingLocationSection.style.display = 'none';
+                newLocationInput.style.display = 'block';
             }
+        }
+        window.onload = function() {
+            updateCustomerOptions();
+            updateLocationOptions();
+            updateLocations(); // Ensure locations are loaded on page load
         }
     </script>
 </head>
-<body onload="toggleCustomerFields(); toggleLocationFields();">
+<body>
+    <header>
+        <h1>VeriNexus Admin Panel</h1>
+        <div class="menu">
+            <a href="{{ url_for('home') }}">Home</a>
+            <a href="{{ url_for('index') }}">Manage Endpoints</a>
+            <a href="{{ url_for('claim_device') }}">Claim Devices</a>
+            <a href="{{ url_for('revoke_device_get') }}">Revoke Devices</a>
+        </div>
+    </header>
 
-<h1>Claim Device</h1>
-
-<form method="post">
-    <label for="mac_address">Select MAC Address to Claim:</label>
-    <select name="mac_address" id="mac_address" required>
-        {% for mac in unclaimed_macs %}
-            <option value="{{ mac }}">{{ mac }}</option>
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
         {% endfor %}
-    </select><br><br>
+    {% endif %}
+    {% endwith %}
 
-    <h2>Customer</h2>
-    <input type="radio" id="existing_customer" name="customer_option" value="existing" onclick="toggleCustomerFields()" checked>
-    <label for="existing_customer">Existing Customer</label>
-    <input type="radio" id="new_customer" name="customer_option" value="new" onclick="toggleCustomerFields()">
-    <label for="new_customer">New Customer</label><br>
+    <h2>Claim Device</h2>
 
-    <div id="existing_customer_div">
-        <label for="existing_customer_select">Select Customer:</label>
-        <select name="existing_customer_id" id="existing_customer_select" onchange="updateLocations()">
-            {% for customer_id, customer_name in customers.items() %}
-                <option value="{{ customer_id }}">{{ customer_name }}</option>
+    {% if unclaimed_macs %}
+    <form method="post">
+        <label for="mac_address">MAC Address:</label><br>
+        <select id="mac_address" name="mac_address" required>
+            {% for mac in unclaimed_macs %}
+            <option value="{{ mac }}">{{ mac }}</option>
             {% endfor %}
         </select>
-    </div>
+        <br><br>
+        <label for="friendly_name">Friendly Name:</label><br>
+        <input type="text" id="friendly_name" name="friendly_name" required>
+        <br><br>
+        <label>Customer:</label><br>
+        <input type="radio" id="existing_customer" name="customer_option" value="existing" checked onchange="updateCustomerOptions();">
+        <label for="existing_customer">Existing Customer</label>
+        <div id="existing_customer_section" class="section">
+            <select name="existing_customer_id" id="existing_customer_id" onchange="updateLocations();">
+                {% for id, name in customers.items() %}
+                <option value="{{ id }}">{{ name }} (ID: {{ id }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <br>
+        <input type="radio" id="new_customer" name="customer_option" value="new" onchange="updateCustomerOptions();">
+        <label for="new_customer">New Customer</label>
+        <div id="new_customer_section" class="section" style="display:none;">
+            <input type="text" name="new_customer_name" placeholder="Customer Name">
+            <br><br>
+            <label>Location:</label><br>
+            <input type="text" name="new_customer_location_name" placeholder="Location Name">
+        </div>
+        <br>
+        <div id="location_options">
+            <label>Location:</label><br>
+            <input type="radio" name="location_option" value="existing" checked onchange="updateLocationOptions();">
+            <label>Existing Location</label>
+            <div id="existing_location_section" class="section">
+                <select name="existing_location" id="existing_location">
+                    <!-- Locations will be populated by JavaScript -->
+                </select>
+            </div>
+            <br>
+            <input type="radio" name="location_option" value="new" onchange="updateLocationOptions();">
+            <label>New Location</label>
+            <div id="new_location_input" class="section" style="display:none;">
+                <input type="text" name="new_location_name" placeholder="Location Name">
+            </div>
+        </div>
+        <br>
+        <button type="submit">Claim Device</button>
+    </form>
+    {% else %}
+    <p>No MAC addresses available to claim.</p>
+    {% endif %}
 
-    <div id="new_customer_div" style="display:none;">
-        <label for="new_customer_name">New Customer Name:</label>
-        <input type="text" name="new_customer_name" id="new_customer_name">
-    </div>
-
-    <h2>Location</h2>
-
-    <!-- Location options for existing customer -->
-    <div id="location_options">
-        <input type="radio" id="existing_location" name="location_option" value="existing" onclick="toggleLocationFields()" checked>
-        <label for="existing_location">Existing Location</label>
-        <input type="radio" id="new_location" name="location_option" value="new" onclick="toggleLocationFields()">
-        <label for="new_location">New Location</label><br>
-    </div>
-
-    <!-- Existing Location Selection -->
-    <div id="existing_location_div">
-        <label for="existing_location_select">Select Location:</label>
-        <select name="existing_location" id="existing_location_select">
-            <!-- Options will be populated by JavaScript -->
-        </select>
-    </div>
-
-    <!-- New Location Input -->
-    <div id="new_location_div" style="display:none;">
-        <label for="new_location_name">New Location Name:</label>
-        <input type="text" name="new_location_name" id="new_location_name">
-    </div>
-
-    <!-- New Customer Location Input -->
-    <div id="new_customer_location_div" style="display:none;">
-        <label for="new_customer_location_name">Location Name:</label>
-        <input type="text" name="new_customer_location_name" id="new_customer_location_name">
-    </div>
-
-    <br><br>
-    <label for="friendly_name">Friendly Name:</label>
-    <input type="text" name="friendly_name" id="friendly_name" required><br><br>
-
-    <input type="submit" value="Claim Device">
-</form>
-
-<script>
-    // Initialize locations on page load
-    updateLocations();
-</script>
-
+    <footer>
+        Version: {{ version }} | &copy; 2024 VeriNexus
+    </footer>
 </body>
 </html>

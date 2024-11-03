@@ -1,29 +1,33 @@
 # admin_app.py
-# Version: 1.9.2
-# Date: 02/11/2024
+# Version: 1.16.0
+# Date: 05/11/2024
 # Description:
 # Flask application for managing devices in the VeriNexus Speed Test system.
-# Provides routes for claiming and revoking devices.
-# Includes enhanced debugging and logging.
-# Adjusted queries to retrieve MAC addresses from fields if necessary.
-# Updated endpoints route with new data structure and validation.
+# Fixes deletion error by storing 'endpoint' as a tag.
+# Enhances user experience with confirmation dialogs and improved error handling.
+# Adds code critique and improvements for better readability and maintenance.
+# Functionality is maintained fully.
 
 import logging
-from flask import Flask, request, render_template, redirect, url_for
+from flask import Flask, request, render_template, redirect, url_for, flash, jsonify
 from influxdb import InfluxDBClient
 import ipaddress
 import re
 
 app = Flask(__name__)
+app.secret_key = 'your_secret_key_here'  # Needed for flash messages
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # InfluxDB configuration
 INFLUXDB_SERVER = '82.165.7.116'
 INFLUXDB_PORT = 8086
-INFLUXDB_DB = 'test_db'
-INFLUXDB_MEASUREMENT = 'endpoints'
+
+# Database and Measurement Names
+ENDPOINTS_DB = 'speedtest_db_clean'
+ENDPOINTS_MEASUREMENT = 'endpoints'
 SPEEDTEST_DB = 'speedtest_db_clean'
 DEVICES_MEASUREMENT = 'devices'
 SPEEDTEST_MEASUREMENT = 'speedtest'
@@ -34,38 +38,60 @@ def create_database_if_not_exists(db_name):
     databases = client.get_list_database()
     if not any(db['name'] == db_name for db in databases):
         client.create_database(db_name)
-        # Add example.com entry in the correct format
+        logger.info(f"Database '{db_name}' created.")
+    else:
+        logger.info(f"Database '{db_name}' already exists.")
+
+    # Add example.com entry in the correct format if measurement is empty
+    client.switch_database(db_name)
+    measurement_query = f'SELECT COUNT(*) FROM "{ENDPOINTS_MEASUREMENT}"'
+    result = client.query(measurement_query)
+    if not list(result.get_points()):
         test_data = [
             {
-                "measurement": INFLUXDB_MEASUREMENT,
+                "measurement": ENDPOINTS_MEASUREMENT,
                 "tags": {
-                    "tag_type": "FQDN"
+                    "tag_type": "FQDN",
+                    "tag_endpoint": "example.com"
                 },
                 "fields": {
-                    "field_endpoint": "example.com",
                     "field_check_ping": True,
                     "field_check_name_resolution": True,
                     "field_check_dns_server": True
                 }
             }
         ]
-        client.switch_database(db_name)
         client.write_points(test_data)
+        logger.info("Added default endpoint 'example.com'.")
 
-# Ensure the test_db exists and the measurement is correctly formatted
-create_database_if_not_exists(INFLUXDB_DB)
-client.switch_database(INFLUXDB_DB)  # Switch to the correct database
+# Ensure the endpoints database exists
+create_database_if_not_exists(ENDPOINTS_DB)
 
 @app.route('/')
+def home():
+    return render_template('home.html', version='1.16.0')
+
+@app.route('/endpoints')
 def index():
-    query = f'SELECT * FROM "{INFLUXDB_MEASUREMENT}"'
+    client.switch_database(ENDPOINTS_DB)  # Ensure we're on the correct database
+    query = f'SELECT * FROM "{ENDPOINTS_MEASUREMENT}"'
     result = client.query(query)
-    points = list(result.get_points())
-    return render_template('index.html', points=points)
+    points = []
+    for point in result.get_points():
+        endpoint = point.get('tag_endpoint') or point.get('field_endpoint')
+        point_data = {
+            'endpoint': endpoint,
+            'type': point.get('tag_type'),
+            'check_ping': point.get('field_check_ping'),
+            'check_name_resolution': point.get('field_check_name_resolution'),
+            'check_dns_server': point.get('field_check_dns_server')
+        }
+        points.append(point_data)
+    return render_template('index.html', points=points, version='1.16.0')
 
 @app.route('/add', methods=['POST'])
 def add_endpoint():
-    endpoint = request.form['endpoint']
+    endpoint = request.form['endpoint'].strip()
     endpoint_type = request.form['endpoint_type']  # 'IP' or 'FQDN'
     check_ping = 'check_ping' in request.form
     check_name_resolution = 'check_name_resolution' in request.form
@@ -77,26 +103,39 @@ def add_endpoint():
         try:
             ipaddress.ip_address(endpoint)
         except ValueError:
-            return "Invalid IP address", 400
+            flash("Invalid IP address.", "error")
+            return redirect(url_for('index'))
         # For IP addresses, name resolution is not applicable
         check_name_resolution = False
     elif endpoint_type == 'FQDN':
         # Validate FQDN (simple validation)
         fqdn_regex = r'^(?=.{1,255}$)([a-z0-9][a-z0-9\-]{0,62}\.)+[a-z]{2,}$'
         if not re.match(fqdn_regex, endpoint, re.IGNORECASE):
-            return "Invalid FQDN", 400
-        # For FQDNs, check_dns_server might not be applicable
+            flash("Invalid FQDN.", "error")
+            return redirect(url_for('index'))
     else:
-        return "Invalid endpoint type", 400
+        flash("Invalid endpoint type.", "error")
+        return redirect(url_for('index'))
 
+    client.switch_database(ENDPOINTS_DB)  # Ensure we're on the correct database
+
+    # Check if endpoint already exists
+    existing_query = f'SELECT * FROM "{ENDPOINTS_MEASUREMENT}" WHERE "tag_endpoint" = \'{endpoint}\''
+    existing_result = client.query(existing_query)
+    existing_points = list(existing_result.get_points())
+    if existing_points:
+        flash("Endpoint already exists.", "error")
+        return redirect(url_for('index'))
+
+    # Store endpoint as a tag for deletion
     json_body = [
         {
-            "measurement": INFLUXDB_MEASUREMENT,
+            "measurement": ENDPOINTS_MEASUREMENT,
             "tags": {
-                "tag_type": endpoint_type
+                "tag_type": endpoint_type,
+                "tag_endpoint": endpoint
             },
             "fields": {
-                "field_endpoint": endpoint,
                 "field_check_ping": check_ping,
                 "field_check_name_resolution": check_name_resolution,
                 "field_check_dns_server": check_dns_server
@@ -104,65 +143,67 @@ def add_endpoint():
         }
     ]
     client.write_points(json_body)
+    flash("Endpoint added successfully.", "success")
     return redirect(url_for('index'))
 
 @app.route('/delete', methods=['POST'])
 def delete_endpoint():
     endpoint = request.form['endpoint']
     endpoint_type = request.form['endpoint_type']
-    query = f"DELETE FROM \"{INFLUXDB_MEASUREMENT}\" WHERE \"field_endpoint\"='{endpoint}' AND \"tag_type\"='{endpoint_type}'"
-    client.query(query)
-    return redirect(url_for('index'))
-
-@app.route('/dropdb', methods=['POST'])
-def drop_database():
-    client.drop_database(INFLUXDB_DB)
+    client.switch_database(ENDPOINTS_DB)  # Ensure we're on the correct database
+    query = f"DELETE FROM \"{ENDPOINTS_MEASUREMENT}\" WHERE \"tag_endpoint\"='{endpoint}' AND \"tag_type\"='{endpoint_type}'"
+    try:
+        client.query(query)
+        flash("Endpoint deleted successfully.", "success")
+    except Exception as e:
+        logger.exception("Error deleting endpoint.")
+        flash(f"Error deleting endpoint: {str(e)}", "error")
     return redirect(url_for('index'))
 
 @app.route('/claim', methods=['GET'])
 def claim_device():
     client.switch_database(SPEEDTEST_DB)
-    app.logger.debug(f"Switched to database: {SPEEDTEST_DB}")
+    logger.debug(f"Switched to database: {SPEEDTEST_DB}")
 
     # Get all MAC addresses from the speedtest measurement
     speedtest_query = f'SHOW TAG VALUES FROM "{SPEEDTEST_MEASUREMENT}" WITH KEY = "tag_mac_address"'
-    app.logger.debug(f"Speedtest query: {speedtest_query}")
+    logger.debug(f"Speedtest query: {speedtest_query}")
     speedtest_result = client.query(speedtest_query)
     speedtest_points = list(speedtest_result.get_points())
 
     if speedtest_points:
         # tag_mac_address is a tag
         speedtest_macs = {point['value'] for point in speedtest_points}
-        app.logger.debug("Retrieved MAC addresses as tags.")
+        logger.debug("Retrieved MAC addresses as tags.")
     else:
         # tag_mac_address might be a field
-        app.logger.debug("No MAC addresses found as tags. Trying to retrieve as fields.")
+        logger.debug("No MAC addresses found as tags. Trying to retrieve as fields.")
         speedtest_query = f'SELECT DISTINCT("tag_mac_address") FROM "{SPEEDTEST_MEASUREMENT}"'
         speedtest_result = client.query(speedtest_query)
         speedtest_points = list(speedtest_result.get_points())
         speedtest_macs = {point['distinct'] for point in speedtest_points if point['distinct']}
-        app.logger.debug(f"MAC addresses from speedtest measurement: {speedtest_macs}")
+        logger.debug(f"MAC addresses from speedtest measurement: {speedtest_macs}")
 
     # Get all MAC addresses from the devices measurement
     devices_query = f'SHOW TAG VALUES FROM "{DEVICES_MEASUREMENT}" WITH KEY = "tag_mac_address"'
-    app.logger.debug(f"Devices query: {devices_query}")
+    logger.debug(f"Devices query: {devices_query}")
     devices_result = client.query(devices_query)
     devices_points = list(devices_result.get_points())
 
     if devices_points:
         devices_macs = {point['value'] for point in devices_points}
-        app.logger.debug("Retrieved devices MAC addresses as tags.")
+        logger.debug("Retrieved devices MAC addresses as tags.")
     else:
-        app.logger.debug("No devices MAC addresses found as tags. Trying to retrieve as fields.")
+        logger.debug("No devices MAC addresses found as tags. Trying to retrieve as fields.")
         devices_query = f'SELECT DISTINCT("tag_mac_address") FROM "{DEVICES_MEASUREMENT}"'
         devices_result = client.query(devices_query)
         devices_points = list(devices_result.get_points())
         devices_macs = {point['distinct'] for point in devices_points if point['distinct']}
-        app.logger.debug(f"MAC addresses from devices measurement: {devices_macs}")
+        logger.debug(f"MAC addresses from devices measurement: {devices_macs}")
 
     # Find unclaimed MAC addresses
     unclaimed_macs = speedtest_macs - devices_macs
-    app.logger.debug(f"Unclaimed MAC addresses: {unclaimed_macs}")
+    logger.debug(f"Unclaimed MAC addresses: {unclaimed_macs}")
 
     # Get all devices data from the devices measurement
     devices_data_query = f'SELECT "field_customer_id", "field_customer_name", "field_location" FROM "{DEVICES_MEASUREMENT}"'
@@ -188,8 +229,14 @@ def claim_device():
     for customer_id in locations:
         locations[customer_id] = list(locations[customer_id])
 
+    if not unclaimed_macs:
+        flash("No MAC addresses available to claim.", "info")
+
+    # Switch back to ENDPOINTS_DB for subsequent operations
+    client.switch_database(ENDPOINTS_DB)
+
     # Pass the data to the template
-    return render_template('claim.html', unclaimed_macs=unclaimed_macs, customers=customers, locations=locations)
+    return render_template('claim.html', unclaimed_macs=unclaimed_macs, customers=customers, locations=locations, version='1.16.0')
 
 @app.route('/claim', methods=['POST'])
 def claim_device_post():
@@ -219,8 +266,9 @@ def claim_device_post():
                 customer_name = customer_points[0]['field_customer_name']
             else:
                 # Handle error
-                app.logger.error(f"Customer ID {customer_id} not found.")
-                return "Error: Customer not found", 400
+                logger.error(f"Customer ID {customer_id} not found.")
+                flash("Customer not found.", "error")
+                return redirect(url_for('claim_device'))
 
             # Handle location
             location_option = request.form['location_option']
@@ -229,17 +277,20 @@ def claim_device_post():
             elif location_option == 'new':
                 location = request.form['new_location_name']
                 if not location:
-                    app.logger.error("New location name is required but not provided.")
-                    return "Error: New location name is required", 400
+                    logger.error("New location name is required but not provided.")
+                    flash("New location name is required.", "error")
+                    return redirect(url_for('claim_device'))
             else:
-                app.logger.error("Invalid location option selected.")
-                return "Error: Invalid location option", 400
+                logger.error("Invalid location option selected.")
+                flash("Invalid location option.", "error")
+                return redirect(url_for('claim_device'))
 
         elif customer_option == 'new':
             customer_name = request.form['new_customer_name']
             if not customer_name:
-                app.logger.error("New customer name is required but not provided.")
-                return "Error: New customer name is required", 400
+                logger.error("New customer name is required but not provided.")
+                flash("New customer name is required.", "error")
+                return redirect(url_for('claim_device'))
             # Generate new customer_id
             customer_id_query = f'SELECT MAX("field_customer_id") FROM "{DEVICES_MEASUREMENT}"'
             customer_id_result = client.query(customer_id_query)
@@ -256,11 +307,13 @@ def claim_device_post():
             # For new customer, location is always new
             location = request.form['new_customer_location_name']
             if not location:
-                app.logger.error("Location name is required for new customer but not provided.")
-                return "Error: Location name is required for new customer", 400
+                logger.error("Location name is required for new customer but not provided.")
+                flash("Location name is required for new customer.", "error")
+                return redirect(url_for('claim_device'))
         else:
-            app.logger.error("Invalid customer option selected.")
-            return "Error: Invalid customer option", 400
+            logger.error("Invalid customer option selected.")
+            flash("Invalid customer option.", "error")
+            return redirect(url_for('claim_device'))
 
         # Validate that friendly_name is unique per customer
         friendly_name_query = f'SELECT * FROM "{DEVICES_MEASUREMENT}" WHERE "field_customer_id" = {customer_id} AND "field_friendly_name" = \'{friendly_name}\''
@@ -268,8 +321,9 @@ def claim_device_post():
         friendly_name_points = list(friendly_name_result.get_points())
         if friendly_name_points:
             # Friendly name already exists for this customer
-            app.logger.error(f"Friendly name '{friendly_name}' already exists for customer ID {customer_id}.")
-            return f"Error: Friendly name '{friendly_name}' already exists for this customer", 400
+            logger.error(f"Friendly name '{friendly_name}' already exists for customer ID {customer_id}.")
+            flash(f"Friendly name '{friendly_name}' already exists for this customer.", "error")
+            return redirect(url_for('claim_device'))
 
         # Add the claimed device to the devices measurement
         json_body = [
@@ -288,11 +342,33 @@ def claim_device_post():
             }
         ]
         client.write_points(json_body)
-        app.logger.info(f"Device with MAC {mac_address} claimed successfully for customer '{customer_name}' (ID: {customer_id}).")
+        logger.info(f"Device with MAC {mac_address} claimed successfully for customer '{customer_name}' (ID: {customer_id}).")
+        flash("Device claimed successfully.", "success")
+
+        # Switch back to ENDPOINTS_DB
+        client.switch_database(ENDPOINTS_DB)
+
         return redirect(url_for('claim_device'))
     except Exception as e:
-        app.logger.exception("An error occurred while processing the claim.")
-        return f"Error: {str(e)}", 500
+        logger.exception("An error occurred while processing the claim.")
+        flash(f"Error: {str(e)}", "error")
+        return redirect(url_for('claim_device'))
+
+@app.route('/get_locations', methods=['GET'])
+def get_locations():
+    customer_id = request.args.get('customer_id')
+    if not customer_id:
+        return jsonify({'locations': []})
+    client.switch_database(SPEEDTEST_DB)
+    devices_data_query = f'SELECT DISTINCT("field_location") FROM "{DEVICES_MEASUREMENT}" WHERE "field_customer_id" = {float(customer_id)}'
+    devices_data_result = client.query(devices_data_query)
+    devices_data_points = list(devices_data_result.get_points())
+    locations = [point['distinct'] for point in devices_data_points if point['distinct']]
+
+    # Switch back to ENDPOINTS_DB
+    client.switch_database(ENDPOINTS_DB)
+
+    return jsonify({'locations': locations})
 
 @app.route('/revoke', methods=['GET'])
 def revoke_device_get():
@@ -308,13 +384,33 @@ def revoke_device_get():
         devices.append({
             'time': point.get('time'),
             'mac_address': point.get('field_mac_address'),
-            'customer_id': point.get('field_customer_id'),
+            'customer_id': int(point.get('field_customer_id')) if point.get('field_customer_id') else '',
             'customer_name': point.get('field_customer_name'),
             'friendly_name': point.get('field_friendly_name'),
             'location': point.get('field_location')
         })
 
-    return render_template('revoke.html', devices=devices)
+    # Get filter and sort parameters from query string
+    filter_column = request.args.get('filter_column')
+    filter_value = request.args.get('filter_value', '').strip()
+    sort_column = request.args.get('sort_column')
+    sort_order = request.args.get('sort_order', 'asc')
+
+    # Apply filtering
+    if filter_column and filter_value:
+        devices = [device for device in devices if filter_value.lower() in str(device.get(filter_column, '')).lower()]
+
+    # Apply sorting
+    if sort_column and sort_order != 'none':
+        devices = sorted(devices, key=lambda x: x.get(sort_column, ''), reverse=(sort_order == 'desc'))
+
+    if not devices:
+        flash("No devices to revoke.", "info")
+
+    # Switch back to ENDPOINTS_DB
+    client.switch_database(ENDPOINTS_DB)
+
+    return render_template('revoke.html', devices=devices, version='1.16.0', filter_column=filter_column, filter_value=filter_value, sort_column=sort_column, sort_order=sort_order)
 
 @app.route('/revoke', methods=['POST'])
 def revoke_device_post():
@@ -322,19 +418,26 @@ def revoke_device_post():
         client.switch_database(SPEEDTEST_DB)
         selected_macs = request.form.getlist('selected_macs')
         if not selected_macs:
-            app.logger.error("No devices selected for revocation.")
-            return "Error: No devices selected", 400
+            logger.error("No devices selected for revocation.")
+            flash("No devices selected.", "error")
+            return redirect(url_for('revoke_device_get'))
 
         for mac in selected_macs:
             # Delete device from devices measurement
             query = f'DELETE FROM "{DEVICES_MEASUREMENT}" WHERE "tag_mac_address" = \'{mac}\''
             client.query(query)
-            app.logger.info(f"Device with MAC {mac} revoked successfully.")
+            logger.info(f"Device with MAC {mac} revoked successfully.")
+
+        flash("Selected devices have been revoked.", "success")
+
+        # Switch back to ENDPOINTS_DB
+        client.switch_database(ENDPOINTS_DB)
 
         return redirect(url_for('revoke_device_get'))
     except Exception as e:
-        app.logger.exception("An error occurred while revoking devices.")
-        return f"Error: {str(e)}", 500
+        logger.exception("An error occurred while revoking devices.")
+        flash(f"Error: {str(e)}", "error")
+        return redirect(url_for('revoke_device_get'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)

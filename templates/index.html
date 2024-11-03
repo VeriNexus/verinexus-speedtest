@@ -1,11 +1,120 @@
+<!-- index.html -->
+<!-- Version: 1.16.0 -->
+<!-- Date: 05/11/2024 -->
+<!-- Description: Endpoint management interface with confirmation dialog for deletions -->
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Admin Interface</title>
+    <title>VeriNexus Admin Panel - Endpoints</title>
+    <style>
+        /* Styles for consistent presentation */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f2f2f2;
+            margin: 0;
+            padding: 20px;
+        }
+        header, nav, footer {
+            background-color: #004080;
+            color: white;
+            padding: 10px;
+        }
+        h1, h2 {
+            color: #004080;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: white;
+        }
+        table, th, td {
+            border: 1px solid #cccccc;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+        }
+        form {
+            margin-top: 20px;
+        }
+        .menu a {
+            color: white;
+            margin-right: 15px;
+            text-decoration: none;
+        }
+        .flash {
+            padding: 10px;
+            margin-bottom: 10px;
+            border: 1px solid;
+            border-radius: 5px;
+        }
+        .flash.success {
+            color: green;
+            border-color: green;
+            background-color: #e6ffe6;
+        }
+        .flash.error {
+            color: red;
+            border-color: red;
+            background-color: #ffe6e6;
+        }
+        .flash.info {
+            color: #004080;
+            border-color: #004080;
+            background-color: #e6f0ff;
+        }
+        button {
+            background-color: #004080;
+            color: white;
+            padding: 8px 12px;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #003366;
+        }
+        input[type="text"], select {
+            padding: 5px;
+            margin-right: 10px;
+        }
+        label {
+            margin-right: 10px;
+        }
+    </style>
+    <script>
+        function confirmDeletion(endpoint, type) {
+            if (confirm(`Are you sure you want to delete the endpoint '${endpoint}' of type '${type}'?`)) {
+                // Proceed with form submission
+                return true;
+            } else {
+                // Cancel form submission
+                return false;
+            }
+        }
+    </script>
 </head>
 <body>
-    <h1>Admin Interface</h1>
+    <header>
+        <h1>VeriNexus Admin Panel</h1>
+        <div class="menu">
+            <a href="{{ url_for('home') }}">Home</a>
+            <a href="{{ url_for('index') }}">Manage Endpoints</a>
+            <a href="{{ url_for('claim_device') }}">Claim Devices</a>
+            <a href="{{ url_for('revoke_device_get') }}">Revoke Devices</a>
+        </div>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+    {% endif %}
+    {% endwith %}
+
+    <h2>Manage Endpoints</h2>
     <form action="/add" method="post">
         <label for="endpoint">Endpoint:</label>
         <input type="text" id="endpoint" name="endpoint" required>
@@ -14,13 +123,14 @@
             <option value="IP">IP</option>
             <option value="FQDN">FQDN</option>
         </select>
-        <br>
+        <br><br>
         <label><input type="checkbox" name="check_ping"> Ping</label>
         <label><input type="checkbox" name="check_name_resolution"> Name Resolution</label>
         <label><input type="checkbox" name="check_dns_server"> DNS Server Response</label>
-        <br>
+        <br><br>
         <button type="submit">Add Endpoint</button>
     </form>
+
     <h2>Existing Endpoints</h2>
     <table>
         <tr>
@@ -33,20 +143,24 @@
         </tr>
         {% for point in points %}
         <tr>
-            <td>{{ point['field_endpoint'] }}</td>
-            <td>{{ point['tag_type'] }}</td>
-            <td>{{ point['field_check_ping'] }}</td>
-            <td>{{ point['field_check_name_resolution'] }}</td>
-            <td>{{ point['field_check_dns_server'] }}</td>
+            <td>{{ point.endpoint }}</td>
+            <td>{{ point.type }}</td>
+            <td>{{ 'Yes' if point.check_ping else 'No' }}</td>
+            <td>{{ 'Yes' if point.check_name_resolution else 'No' }}</td>
+            <td>{{ 'Yes' if point.check_dns_server else 'No' }}</td>
             <td>
-                <form action="/delete" method="post" style="display:inline;">
-                    <input type="hidden" name="endpoint" value="{{ point['field_endpoint'] }}">
-                    <input type="hidden" name="endpoint_type" value="{{ point['tag_type'] }}">
+                <form action="/delete" method="post" style="display:inline;" onsubmit="return confirmDeletion('{{ point.endpoint }}', '{{ point.type }}');">
+                    <input type="hidden" name="endpoint" value="{{ point.endpoint }}">
+                    <input type="hidden" name="endpoint_type" value="{{ point.type }}">
                     <button type="submit">Delete</button>
                 </form>
             </td>
         </tr>
         {% endfor %}
     </table>
+
+    <footer>
+        Version: {{ version }} | &copy; 2024 VeriNexus
+    </footer>
 </body>
 </html>

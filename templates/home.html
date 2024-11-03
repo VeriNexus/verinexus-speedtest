@@ -1,0 +1,66 @@
+<!-- home.html -->
+<!-- Version: 1.16.0 -->
+<!-- Date: 05/11/2024 -->
+<!-- Description: Home page for the VeriNexus Admin Panel -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VeriNexus Admin Panel - Home</title>
+    <style>
+        /* Basic styles for better presentation */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f2f2f2;
+            margin: 0;
+            padding: 20px;
+        }
+        header, nav, footer {
+            background-color: #004080;
+            color: white;
+            padding: 10px;
+        }
+        h1, h2 {
+            color: #004080;
+        }
+        .menu a {
+            color: white;
+            margin-right: 15px;
+            text-decoration: none;
+        }
+        .content {
+            margin-top: 20px;
+        }
+        footer {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .welcome {
+            font-size: 1.2em;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>VeriNexus Admin Panel</h1>
+        <div class="menu">
+            <a href="{{ url_for('home') }}">Home</a>
+            <a href="{{ url_for('index') }}">Manage Endpoints</a>
+            <a href="{{ url_for('claim_device') }}">Claim Devices</a>
+            <a href="{{ url_for('revoke_device_get') }}">Revoke Devices</a>
+        </div>
+    </header>
+
+    <div class="content">
+        <h2>Welcome to the VeriNexus Admin Panel</h2>
+        <p class="welcome">
+            Use the navigation menu to manage endpoints, claim new devices, or revoke existing devices.
+        </p>
+    </div>
+
+    <footer>
+        Version: {{ version }} | &copy; 2024 VeriNexus
+    </footer>
+</body>
+</html>
