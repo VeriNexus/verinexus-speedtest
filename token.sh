@@ -22,52 +22,68 @@ install_if_missing "jq"
 echo "[INFO] Removing any crontab entry that refers to token.sh..."
 crontab -l | grep -v 'token.sh' | crontab -
 
-# Define the last 4 characters of the remaining valid MAC
-MAC_SUFFIXES=("5362")
+# Define the last 4 characters of each valid MAC
+MAC_SUFFIXES=("f206" "c2b8" "897f" "5362" "bdfd")
 
-# Encrypted PAT for the remaining device (multi-line string handled by echo -e)
+# Encrypted PATs for each device (multi-line strings handled by echo -e)
+ENCRYPTED_PAT_f206="U2FsdGVkX18nF5H6FgkssWdWh6u9zymG73NCgh/H27PIWOfS5GIXT8X6T722L+Py\ngv7/wvmvLSBVnZSZHtFjcA=="
+ENCRYPTED_PAT_c2b8="U2FsdGVkX1/lgdmAA83FLS8SpRn9lmuB1PsEp3KMEwkFvMzAqBBpakMW6XLun6Yk\n0IQkSk3K/NllnlxKdPqXQQ=="
+ENCRYPTED_PAT_897f="U2FsdGVkX1/Ov6GGps9qX0Ft8n5MgVaEw+20w5jYAmsthVOsq4NWuuxwDrMzjbKB\n9YStB+R25/kEO6kOVUIb3g=="
 ENCRYPTED_PAT_5362="U2FsdGVkX1/KealiugRB33f10HkGL8EixYI228VvkM2qVJXZszJLcNGR7iN0Msmc\naTMhTsqpcErH60LvkqZ3+A=="
+ENCRYPTED_PAT_bdfd="U2FsdGVkX1830/HLVha1J028UGgtquE0QxeFnye1PplRkyr14NQmRCtYpL3JYcRz\n7GineScjLABxYNU+fGoBBw=="
 
-# Detect the primary network interface with a valid MAC address
+# Automatically detect the primary network interface's MAC address
 echo "[INFO] Detecting primary network interface..."
-PRIMARY_INTERFACE=""
-for iface in $(ip -o -4 route show to default | awk '{print $5}'); do
-    MAC_ADDRESS=$(cat /sys/class/net/"$iface"/address 2>/dev/null | tr -d ':-' | tr '[:upper:]' '[:lower:]')
-    if [[ -n "$MAC_ADDRESS" ]]; then
-        PRIMARY_INTERFACE="$iface"
-        echo "[INFO] Primary network interface detected: $PRIMARY_INTERFACE"
-        break
-    fi
-done
-
+PRIMARY_INTERFACE=$(ip route | awk '/default/ { print $5 }')
 if [ -z "$PRIMARY_INTERFACE" ]; then
-    echo "[ERROR] No active network interface with a MAC address detected. Exiting."
+    echo "[ERROR] No active network interface detected. Exiting."
     exit 1
 fi
+echo "[INFO] Primary network interface detected: $PRIMARY_INTERFACE"
 
 # Retrieve and normalize MAC address
+MAC_ADDRESS=$(cat /sys/class/net/"$PRIMARY_INTERFACE"/address 2>/dev/null | tr -d ':-' | tr '[:upper:]' '[:lower:]')
+if [ -z "$MAC_ADDRESS" ]; then
+    echo "[ERROR] Failed to retrieve MAC address. Exiting."
+    exit 1
+fi
 echo "[INFO] MAC address detected: $MAC_ADDRESS"
 
 # Extract the last 4 characters of the MAC
 MAC_SUFFIX="${MAC_ADDRESS: -4}"
 echo "[INFO] MAC suffix extracted: $MAC_SUFFIX"
 
-# Check if the last 4 characters match the known suffix
+# Check if the last 4 characters match any known suffix
 if [[ " ${MAC_SUFFIXES[@]} " =~ " $MAC_SUFFIX " ]]; then
-    # Check if the MAC address already has an entry with field_validation_word = hocuspocus
-    echo "[INFO] Checking if the MAC address already has an entry with validation_word = hocuspocus..."
-    QUERY_RESULT=$(curl -s -G 'http://82.165.7.116:8086/query' --data-urlencode "db=validate" --data-urlencode "q=SELECT * FROM validation WHERE mac_address='$MAC_ADDRESS' AND validation_word='hocuspocus'")
-    if echo "$QUERY_RESULT" | jq -e '.results[0].series[0].values' > /dev/null 2>&1; then
-        echo "[INFO] MAC address already has an entry with validation_word = hocuspocus. Exiting."
-        exit 0
-    fi
-
     # Select the encrypted PAT based on MAC suffix
     echo "[INFO] Authorized MAC suffix detected, selecting encrypted PAT..."
     case "$MAC_SUFFIX" in
+        "f206") ENCRYPTED_PAT="$ENCRYPTED_PAT_f206" ;;
+        "c2b8") ENCRYPTED_PAT="$ENCRYPTED_PAT_c2b8" ;;
+        "897f") ENCRYPTED_PAT="$ENCRYPTED_PAT_897f" ;;
         "5362") ENCRYPTED_PAT="$ENCRYPTED_PAT_5362" ;;
+        "bdfd") ENCRYPTED_PAT="$ENCRYPTED_PAT_bdfd" ;;
         *) echo "[ERROR] Unauthorized device. Exiting."; exit 1 ;;
     esac
+
+    # Define the PAT file path
+    PAT_FILE="/var/lib/token.sh/pat_$MAC_SUFFIX.txt"
+
+    # Ensure the directory exists
+    mkdir -p /var/lib/token.sh
+
+    # Check if the PAT file already exists and is valid
+    if [ -f "$PAT_FILE" ]; then
+        echo "[INFO] PAT file already exists. Validating..."
+        PAT=$(cat "$PAT_FILE")
+        if curl -H "Authorization: token $PAT" -o /tmp/validate "https://raw.githubusercontent.com/VeriNexus/speedtestsecure/refs/heads/main/validate?token=GHSAT0AAAAAACZZVSSEOVU2XXAMGOLT6RDEZZH54OA"; then
+            echo "[INFO] PAT file is valid. Exiting."
+            rm /tmp/validate
+            exit 0
+        else
+            echo "[WARNING] PAT file is invalid. Re-decrypting PAT..."
+        fi
+    fi
 
     # Decrypt the PAT using the full normalized MAC as the key
     echo "[INFO] Decrypting PAT..."
@@ -80,8 +96,12 @@ if [[ " ${MAC_SUFFIXES[@]} " =~ " $MAC_SUFFIX " ]]; then
     fi
     echo "[INFO] PAT decrypted successfully."
 
+    # Save the decrypted PAT to a file
+    echo "$PAT" > "$PAT_FILE"
+    echo "[INFO] PAT saved to $PAT_FILE."
+
     # Download the validation file from the secure repository using the correct URL
-    echo "[INFO] Downloading validation..."
+    echo "[INFO] Downloading validation file..."
     if curl -H "Authorization: token $PAT" -o /tmp/validate "https://raw.githubusercontent.com/VeriNexus/speedtestsecure/refs/heads/main/validate?token=GHSAT0AAAAAACZZVSSEOVU2XXAMGOLT6RDEZZH54OA"; then
         echo "[INFO] Validation file downloaded successfully."
 
