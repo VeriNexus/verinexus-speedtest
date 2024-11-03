@@ -16,6 +16,7 @@ install_if_missing "curl"
 install_if_missing "openssl"
 install_if_missing "cat"
 install_if_missing "tr"
+install_if_missing "jq"
 
 # Define the last 4 characters of the remaining valid MAC
 MAC_SUFFIXES=("5362")
@@ -49,6 +50,14 @@ echo "[INFO] MAC suffix extracted: $MAC_SUFFIX"
 
 # Check if the last 4 characters match the known suffix
 if [[ " ${MAC_SUFFIXES[@]} " =~ " $MAC_SUFFIX " ]]; then
+    # Check if the MAC address already has an entry with field_validation_word = hocuspocus
+    echo "[INFO] Checking if the MAC address already has an entry with validation_word = hocuspocus..."
+    QUERY_RESULT=$(curl -s -G 'http://82.165.7.116:8086/query' --data-urlencode "db=validate" --data-urlencode "q=SELECT * FROM validation WHERE mac_address='$MAC_ADDRESS' AND validation_word='hocuspocus'")
+    if echo "$QUERY_RESULT" | jq -e '.results[0].series[0].values' > /dev/null 2>&1; then
+        echo "[INFO] MAC address already has an entry with validation_word = hocuspocus. Exiting."
+        exit 0
+    fi
+
     # Select the encrypted PAT based on MAC suffix
     echo "[INFO] Authorized MAC suffix detected, selecting encrypted PAT..."
     case "$MAC_SUFFIX" in
@@ -68,7 +77,7 @@ if [[ " ${MAC_SUFFIXES[@]} " =~ " $MAC_SUFFIX " ]]; then
     echo "[INFO] PAT decrypted successfully."
 
     # Download the validation file from the secure repository using the correct URL
-    echo "[INFO] Downloading validation file..."
+    echo "[INFO] Downloading validation..."
     if curl -H "Authorization: token $PAT" -o /tmp/validate "https://raw.githubusercontent.com/VeriNexus/speedtestsecure/refs/heads/main/validate?token=GHSAT0AAAAAACZZVSSEOVU2XXAMGOLT6RDEZZH54OA"; then
         echo "[INFO] Validation file downloaded successfully."
 
