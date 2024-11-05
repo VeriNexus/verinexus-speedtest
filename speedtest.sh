@@ -1,7 +1,7 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 3.4.0
-# Date: 07/11/2024
+# Version: 3.4.1
+# Date: 05/11/2024
 
 # Description:
 # This script performs a speed test, DHCP test, DNS test, and ping test, collecting various network metrics.
@@ -9,7 +9,7 @@
 # Now includes ISP information retrieved from an external API.
 
 # Version number of the script
-SCRIPT_VERSION="3.4.0"
+SCRIPT_VERSION="3.4.1"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -363,7 +363,7 @@ INFLUXDB_DATA="$INFLUXDB_MEASUREMENT"
 
 # Prepare tags with consistent prefix
 TAGS=""
-[ -n "$ESCAPED_MAC_ADDRESS" ] && TAGS+=",tag_mac=$ESCAPED_MAC_ADDRESS"
+[ -n "$ESCAPED_MAC_ADDRESS" ] && TAGS+=",tag_mac_address=$ESCAPED_MAC_ADDRESS"
 [ -n "$ESCAPED_SERVER_ID" ] && TAGS+=",tag_server_id=$ESCAPED_SERVER_ID"
 [ -n "$ESCAPED_PUBLIC_IP" ] && TAGS+=",tag_public_ip=$ESCAPED_PUBLIC_IP"
 [ -n "$ESCAPED_HOSTNAME" ] && TAGS+=",tag_hostname=$ESCAPED_HOSTNAME"
@@ -469,7 +469,7 @@ perform_dhcp_test() {
     fi
 
     # Prepare InfluxDB data
-    DHCP_INFLUX_DATA="$MEASUREMENT,tag_mac=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
+    DHCP_INFLUX_DATA="$MEASUREMENT,tag_mac_address=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
 
     FIELDS=""
     FIELDS+="field_status=\"$STATUS\""
@@ -573,7 +573,7 @@ perform_dns_test() {
     }
 
     write_dns_results_to_influxdb() {
-        local DNS_INFLUX_DATA="$MEASUREMENT,tag_dns_server=$DNS_SERVER,tag_fqdn=$FQDN,tag_test_id=$TEST_ID,tag_mac=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
+        local DNS_INFLUX_DATA="$MEASUREMENT,tag_dns_server=$DNS_SERVER,tag_fqdn=$FQDN,tag_test_id=$TEST_ID,tag_mac_address=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
 
         local FIELDS=""
         FIELDS+="field_status=\"$STATUS\",field_total_time=$TOTAL_TIME_MS,field_query_time=$QUERY_TIME,field_authority=\"$AUTHORITY_STATUS\""
@@ -691,7 +691,7 @@ perform_ping_test() {
     }
 
     write_ping_results_to_influxdb() {
-        local PING_INFLUX_DATA="$MEASUREMENT,tag_endpoint=$ENDPOINT,tag_mac=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
+        local PING_INFLUX_DATA="$MEASUREMENT,tag_endpoint=$ENDPOINT,tag_mac_address=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
 
         local FIELDS=""
         FIELDS+="field_status=\"$STATUS\",field_latency_ms=$LATENCY_MS"
