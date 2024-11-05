@@ -1,15 +1,15 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 2.9.8
-# Date: 31/10/2024
+# Version: 3.4.0
+# Date: 07/11/2024
 
 # Description:
-# This script performs a speed test and collects various network metrics.
+# This script performs a speed test, DHCP test, DNS test, and ping test, collecting various network metrics.
 # It uploads the results to an InfluxDB server for monitoring.
 # Now includes ISP information retrieved from an external API.
 
 # Version number of the script
-SCRIPT_VERSION="2.9.8"
+SCRIPT_VERSION="3.4.0"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -68,7 +68,7 @@ rotate_log_file
 # Function to check and install dependencies
 check_and_install_dependencies() {
     local missing_dependencies=()
-    local dependencies=("awk" "curl" "jq" "dig" "speedtest-cli" "ping" "ip" "tput" "grep" "sed" "hostname" "date" "sleep")
+    local dependencies=("awk" "curl" "jq" "dig" "speedtest-cli" "ping" "ip" "tput" "grep" "sed" "hostname" "date" "sleep" "dhclient")
 
     for dep in "${dependencies[@]}"; do
         if ! command -v $dep &> /dev/null; then
@@ -83,42 +83,33 @@ check_and_install_dependencies() {
             log_message "ERROR" "$dep is not installed."
         done
 
-        # Prompt user to install missing dependencies
-        read -p "Do you want to install the missing dependencies now? (y/n): " choice
-        if [[ "$choice" =~ ^[Yy]$ ]]; then
-            install_dependencies "${missing_dependencies[@]}"
-        else
-            echo -e "${CROSS} ${RED}Please install the missing dependencies and rerun the script.${NC}"
-            exit 1
-        fi
+        # Install missing dependencies
+        echo -e "${BLUE}Installing missing dependencies...${NC}"
+        sudo apt-get update
+        for dep in "${missing_dependencies[@]}"; do
+            case "$dep" in
+                "dig")
+                    sudo apt-get install -y dnsutils
+                    ;;
+                "ip")
+                    sudo apt-get install -y iproute2
+                    ;;
+                "speedtest-cli")
+                    sudo apt-get install -y speedtest-cli
+                    ;;
+                "ping")
+                    sudo apt-get install -y iputils-ping
+                    ;;
+                "dhclient")
+                    sudo apt-get install -y isc-dhcp-client
+                    ;;
+                *)
+                    sudo apt-get install -y "$dep"
+                    ;;
+            esac
+        done
+        echo -e "${CHECKMARK} ${GREEN}Dependencies installed.${NC}"
     fi
-}
-
-# Function to install dependencies
-install_dependencies() {
-    local dependencies=("$@")
-    echo -e "${BLUE}Installing missing dependencies...${NC}"
-    sudo apt-get update
-    for dep in "${dependencies[@]}"; do
-        case "$dep" in
-            "dig")
-                sudo apt-get install -y dnsutils
-                ;;
-            "ip")
-                sudo apt-get install -y iproute2
-                ;;
-            "speedtest-cli")
-                sudo apt-get install -y speedtest-cli
-                ;;
-            "ping")
-                sudo apt-get install -y iputils-ping
-                ;;
-            *)
-                sudo apt-get install -y "$dep"
-                ;;
-        esac
-    done
-    echo -e "${CHECKMARK} ${GREEN}Dependencies installed.${NC}"
 }
 
 # Call the check_and_install_dependencies function early in the script
@@ -314,7 +305,7 @@ else
 fi
 echo -e "${CHECKMARK}${GREEN}MAC Address: $MAC_ADDRESS, LAN IP: $LAN_IP${NC}"
 
-# Step 5: Extracting the relevant fields
+# Step 5: Extracting Speed Test Results
 echo -ne "${CYAN}Step 5: Extracting Speed Test Results... "
 SERVER_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
 SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}' | sed 's/\"//g') # Remove quotes
@@ -370,9 +361,9 @@ ESCAPED_SCRIPT_VERSION=$(echo "$SCRIPT_VERSION" | sed 's/"/\\"/g')
 # Initialize InfluxDB data
 INFLUXDB_DATA="$INFLUXDB_MEASUREMENT"
 
-# Prepare tags
+# Prepare tags with consistent prefix
 TAGS=""
-[ -n "$ESCAPED_MAC_ADDRESS" ] && TAGS+=",tag_mac_address=$ESCAPED_MAC_ADDRESS"
+[ -n "$ESCAPED_MAC_ADDRESS" ] && TAGS+=",tag_mac=$ESCAPED_MAC_ADDRESS"
 [ -n "$ESCAPED_SERVER_ID" ] && TAGS+=",tag_server_id=$ESCAPED_SERVER_ID"
 [ -n "$ESCAPED_PUBLIC_IP" ] && TAGS+=",tag_public_ip=$ESCAPED_PUBLIC_IP"
 [ -n "$ESCAPED_HOSTNAME" ] && TAGS+=",tag_hostname=$ESCAPED_HOSTNAME"
@@ -382,7 +373,7 @@ TAGS=""
 # Append tags to InfluxDB data
 INFLUXDB_DATA+="$TAGS"
 
-# Prepare fields
+# Prepare fields with consistent prefix
 FIELDS=""
 [ -n "$LATENCY" ] && FIELDS+="field_latency=$LATENCY"
 [ -n "$DOWNLOAD_SPEED" ] && FIELDS+=",field_download_speed=$DOWNLOAD_SPEED"
@@ -409,16 +400,359 @@ CURRENT_TIME=$(date +%s%N)
 # Append timestamp to InfluxDB data
 INFLUXDB_DATA+=" $CURRENT_TIME"
 
-# Step 8: Sending data to InfluxDB
-echo -ne "${CYAN}Step 8: Saving Results to InfluxDB... "
+# Step 8: Saving Speed Test Results to InfluxDB
+echo -ne "${CYAN}Step 8: Saving Speed Test Results to InfluxDB... "
 curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$INFLUXDB_DATA"
 if [ $? -eq 0 ]; then
     echo -e "${CHECKMARK}${GREEN}Data successfully saved to InfluxDB.${NC}"
-    log_message "INFO" "Data saved to InfluxDB database $INFLUXDB_DB."
+    log_message "INFO" "Speed test data saved to InfluxDB database $INFLUXDB_DB."
 else
     echo -e "${CROSS}${RED}Failed to save data to InfluxDB.${NC}"
-    log_message "ERROR" "Failed to save data to InfluxDB."
+    log_message "ERROR" "Failed to save speed test data to InfluxDB."
 fi
+
+# Step 9: Performing DHCP Test
+echo -e "${CYAN}${BOLD}Step 9: Performing DHCP Test...${NC}"
+perform_dhcp_test() {
+    local START_TIME
+    local END_TIME
+    local RESPONSE_TIME
+    local IP_ADDR
+    local GATEWAY
+    local DNS
+    local LEASE_DURATION
+    local STATUS
+    local ERROR_MESSAGE
+    local DHCP_INFLUX_DATA
+    local MEASUREMENT="dhcp"
+
+    print_debug() {
+        echo -e "${YELLOW}DEBUG: $1${NC}"
+    }
+
+    print_progress() {
+        echo -e "${GREEN}>>> $1${NC}"
+    }
+
+    print_progress "Performing DHCP test on interface $ACTIVE_IFACE..."
+
+    # Release and renew DHCP lease, capture start time
+    START_TIME=$(date +%s%N)
+    print_debug "Releasing current DHCP lease..."
+    sudo dhclient -v -r $ACTIVE_IFACE 2>&1 | tee dhcp_release.log
+
+    print_debug "Renewing DHCP lease..."
+    DHCP_OUTPUT=$(sudo dhclient -v $ACTIVE_IFACE 2>&1 | tee dhcp_renew.log)
+
+    # Check if the DHCP lease was successfully renewed
+    if [[ $? -ne 0 ]]; then
+        STATUS="fail"
+        ERROR_MESSAGE="DHCP lease renewal failed"
+        print_debug "DHCP renewal failed. See dhcp_renew.log for details."
+    else
+        END_TIME=$(date +%s%N)
+        RESPONSE_TIME=$(( (END_TIME - START_TIME) / 1000000 ))  # Convert nanoseconds to milliseconds
+        print_progress "DHCP lease successfully renewed."
+
+        # Capture current IP and lease information
+        IP_ADDR=$(ip addr show $ACTIVE_IFACE | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
+        GATEWAY=$(ip route show default | awk '{print $3}')
+
+        # Attempt to capture DNS from resolv.conf
+        DNS=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')
+
+        # Extract lease duration from DHCP output
+        LEASE_DURATION=$(echo "$DHCP_OUTPUT" | grep -oP 'renewal in \K[0-9]+')
+        LEASE_DURATION=${LEASE_DURATION:-"N/A"}
+
+        STATUS="pass"
+    fi
+
+    # Prepare InfluxDB data
+    DHCP_INFLUX_DATA="$MEASUREMENT,tag_mac=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
+
+    FIELDS=""
+    FIELDS+="field_status=\"$STATUS\""
+    if [[ "$STATUS" == "pass" ]]; then
+        [ -n "$IP_ADDR" ] && FIELDS+=",field_ip=\"$IP_ADDR\""
+        [ -n "$GATEWAY" ] && FIELDS+=",field_gateway=\"$GATEWAY\""
+        [ -n "$DNS" ] && FIELDS+=",field_dns=\"$DNS\""
+        [ -n "$RESPONSE_TIME" ] && FIELDS+=",field_response_time=$RESPONSE_TIME"
+        [ -n "$LEASE_DURATION" ] && FIELDS+=",field_lease_duration=\"$LEASE_DURATION\""
+    else
+        [ -n "$ERROR_MESSAGE" ] && FIELDS+=",field_error_message=\"$ERROR_MESSAGE\""
+    fi
+
+    # Remove leading comma if necessary
+    FIELDS=$(echo "$FIELDS" | sed 's/^,//')
+
+    # Append fields to data
+    DHCP_INFLUX_DATA+=" $FIELDS"
+
+    # Append timestamp
+    CURRENT_TIME=$(date +%s%N)
+    DHCP_INFLUX_DATA+=" $CURRENT_TIME"
+
+    # Send data to InfluxDB
+    print_progress "Writing DHCP test results to InfluxDB..."
+    curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$DHCP_INFLUX_DATA"
+
+    if [ $? -eq 0 ]; then
+        print_progress "DHCP results successfully written to InfluxDB."
+        log_message "INFO" "DHCP test data saved to InfluxDB database $INFLUXDB_DB."
+    else
+        echo -e "${RED}Error: Failed to write DHCP results to InfluxDB.${NC}"
+        log_message "ERROR" "Failed to save DHCP test data to InfluxDB."
+    fi
+}
+perform_dhcp_test
+
+# Step 10: Performing DNS Test
+echo -e "${CYAN}${BOLD}Step 10: Performing DNS Test...${NC}"
+perform_dns_test() {
+    local TEST_ID="run-$(date +%Y%m%d%H%M%S)"
+    local MEASUREMENT="dns"
+    local DNS_SERVERS
+    local FQDNS
+
+    print_debug() {
+        echo -e "${YELLOW}DEBUG: $1${NC}"
+    }
+
+    print_progress() {
+        echo -e "${GREEN}>>> $1${NC}"
+    }
+
+    read_endpoints_from_influx() {
+        print_progress "Reading DNS servers and FQDNs from InfluxDB..."
+
+        # Query InfluxDB for DNS servers
+        local dns_query='SELECT last("field_check_dns_server") FROM "endpoints" WHERE "field_check_dns_server" = true GROUP BY "tag_endpoint"'
+        print_debug "DNS Query: $dns_query"
+
+        local dns_query_result=$(curl -sG "$INFLUXDB_SERVER/query" \
+            --data-urlencode "db=$INFLUXDB_DB" \
+            --data-urlencode "q=$dns_query")
+        print_debug "DNS Query Result: $dns_query_result"
+
+        if echo "$dns_query_result" | jq -e '.results[0].series' >/dev/null 2>&1; then
+            DNS_SERVERS=$(echo "$dns_query_result" | jq -r '.results[0].series[].tags.tag_endpoint')
+        else
+            echo -e "${RED}Error: No valid DNS servers found for testing.${NC}"
+            log_message "ERROR" "No valid DNS servers found for testing."
+            return 1
+        fi
+
+        # Query InfluxDB for FQDNs to resolve
+        local fqdn_query='SELECT last("field_check_name_resolution") FROM "endpoints" WHERE "field_check_name_resolution" = true GROUP BY "tag_endpoint"'
+        print_debug "FQDN Query: $fqdn_query"
+
+        local fqdn_query_result=$(curl -sG "$INFLUXDB_SERVER/query" \
+            --data-urlencode "db=$INFLUXDB_DB" \
+            --data-urlencode "q=$fqdn_query")
+        print_debug "FQDN Query Result: $fqdn_query_result"
+
+        if echo "$fqdn_query_result" | jq -e '.results[0].series' >/dev/null 2>&1; then
+            FQDNS=$(echo "$fqdn_query_result" | jq -r '.results[0].series[].tags.tag_endpoint')
+        else
+            echo -e "${RED}Error: No valid FQDNs found for testing.${NC}"
+            log_message "ERROR" "No valid FQDNs found for testing."
+            return 1
+        fi
+
+        print_debug "DNS Servers: $DNS_SERVERS"
+        print_debug "FQDNs: $FQDNS"
+
+        # Display the list of tests to be performed
+        echo -e "${BLUE}Tests to be performed:${NC}"
+        for DNS_SERVER in $DNS_SERVERS; do
+            for FQDN in $FQDNS; do
+                echo -e "${BLUE}- DNS Server: $DNS_SERVER, FQDN: $FQDN${NC}"
+            done
+        done
+    }
+
+    write_dns_results_to_influxdb() {
+        local DNS_INFLUX_DATA="$MEASUREMENT,tag_dns_server=$DNS_SERVER,tag_fqdn=$FQDN,tag_test_id=$TEST_ID,tag_mac=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
+
+        local FIELDS=""
+        FIELDS+="field_status=\"$STATUS\",field_total_time=$TOTAL_TIME_MS,field_query_time=$QUERY_TIME,field_authority=\"$AUTHORITY_STATUS\""
+        if [[ "$STATUS" == "fail" ]]; then
+            FIELDS+=",field_error_message=\"$ERROR_MESSAGE\""
+        fi
+
+        # Remove leading comma if necessary
+        FIELDS=$(echo "$FIELDS" | sed 's/^,//')
+
+        # Append fields to data
+        DNS_INFLUX_DATA+=" $FIELDS"
+
+        # Append timestamp
+        CURRENT_TIME=$(date +%s%N)
+        DNS_INFLUX_DATA+=" $CURRENT_TIME"
+
+        # Send data to InfluxDB
+        print_progress "Writing DNS test results to InfluxDB..."
+        curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$DNS_INFLUX_DATA"
+
+        if [ $? -eq 0 ]; then
+            print_progress "DNS results successfully written to InfluxDB."
+            log_message "INFO" "DNS test data saved to InfluxDB database $INFLUXDB_DB."
+        else
+            echo -e "${RED}Error: Failed to write DNS results to InfluxDB.${NC}"
+            log_message "ERROR" "Failed to save DNS test data to InfluxDB."
+        fi
+    }
+
+    perform_dns_test_logic() {
+        for DNS_SERVER in $DNS_SERVERS; do
+            for FQDN in $FQDNS; do
+                if [[ -z "$DNS_SERVER" || -z "$FQDN" ]]; then
+                    echo -e "${RED}Error: Skipping invalid DNS server or FQDN.${NC}"
+                    continue
+                fi
+
+                print_progress "Testing $FQDN with DNS server $DNS_SERVER..."
+
+                # Capture start time
+                START_TIME=$(date +%s%N)
+
+                # Perform DNS lookup and capture details
+                DNS_RESPONSE=$(dig @$DNS_SERVER $FQDN +stats +noall +answer 2>&1)
+                END_TIME=$(date +%s%N)
+                TOTAL_TIME_MS=$(( (END_TIME - START_TIME) / 1000000 ))  # Convert to milliseconds
+
+                # Extract relevant DNS metrics
+                QUERY_TIME=$(echo "$DNS_RESPONSE" | grep -oP '(?<=Query time: )[0-9]+' || echo "0")
+                AUTHORITY_STATUS=$(echo "$DNS_RESPONSE" | grep -q "status: NOERROR" && echo "authoritative" || echo "non-authoritative")
+
+                # Determine success or failure based on presence of an "ANSWER" section in the dig output
+                if echo "$DNS_RESPONSE" | grep -q "IN"; then
+                    STATUS="pass"
+                else
+                    STATUS="fail"
+                    ERROR_MESSAGE=$(echo "$DNS_RESPONSE" | grep -m 1 ";;" || echo "N/A")
+                fi
+
+                # Slimmed-down output for users and detailed debug info for logs
+                print_debug "[$DNS_SERVER | $FQDN] - Status: $STATUS, Total Time: $TOTAL_TIME_MS ms, Query Time: $QUERY_TIME ms"
+
+                # Write results to InfluxDB
+                write_dns_results_to_influxdb
+            done
+        done
+    }
+
+    # Main Execution of DNS Test
+    read_endpoints_from_influx
+    if [ $? -ne 0 ]; then
+        echo -e "${YELLOW}Skipping DNS test due to previous errors.${NC}"
+        return 1
+    fi
+    perform_dns_test_logic
+}
+perform_dns_test || echo -e "${YELLOW}DNS test encountered errors but continuing to Ping Test.${NC}"
+
+# Step 11: Performing Ping Test
+echo -e "${CYAN}${BOLD}Step 11: Performing Ping Test...${NC}"
+perform_ping_test() {
+    local MEASUREMENT="ping"
+    local PING_ENDPOINTS
+
+    print_debug() {
+        echo -e "${YELLOW}DEBUG: $1${NC}"
+    }
+
+    print_progress() {
+        echo -e "${GREEN}>>> $1${NC}"
+    }
+
+    read_ping_endpoints_from_influx() {
+        print_progress "Reading ping endpoints from InfluxDB..."
+
+        # Query InfluxDB for endpoints to ping
+        local ping_query='SELECT last("field_check_ping") FROM "endpoints" WHERE "field_check_ping" = true GROUP BY "tag_endpoint"'
+        print_debug "Ping Query: $ping_query"
+
+        local ping_query_result=$(curl -sG "$INFLUXDB_SERVER/query" \
+            --data-urlencode "db=$INFLUXDB_DB" \
+            --data-urlencode "q=$ping_query")
+        print_debug "Ping Query Result: $ping_query_result"
+
+        if echo "$ping_query_result" | jq -e '.results[0].series' >/dev/null 2>&1; then
+            PING_ENDPOINTS=$(echo "$ping_query_result" | jq -r '.results[0].series[].tags.tag_endpoint')
+        else
+            echo -e "${RED}Error: No valid endpoints found for ping testing.${NC}"
+            log_message "ERROR" "No valid endpoints found for ping testing."
+            return 1
+        fi
+
+        print_debug "Ping Endpoints: $PING_ENDPOINTS"
+    }
+
+    write_ping_results_to_influxdb() {
+        local PING_INFLUX_DATA="$MEASUREMENT,tag_endpoint=$ENDPOINT,tag_mac=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
+
+        local FIELDS=""
+        FIELDS+="field_status=\"$STATUS\",field_latency_ms=$LATENCY_MS"
+        if [[ "$STATUS" == "fail" ]]; then
+            FIELDS+=",field_error_message=\"$ERROR_MESSAGE\""
+        fi
+
+        # Remove leading comma if necessary
+        FIELDS=$(echo "$FIELDS" | sed 's/^,//')
+
+        # Append fields to data
+        PING_INFLUX_DATA+=" $FIELDS"
+
+        # Append timestamp
+        CURRENT_TIME=$(date +%s%N)
+        PING_INFLUX_DATA+=" $CURRENT_TIME"
+
+        # Send data to InfluxDB
+        print_progress "Writing ping test results to InfluxDB..."
+        curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$PING_INFLUX_DATA"
+
+        if [ $? -eq 0 ]; then
+            print_progress "Ping results successfully written to InfluxDB."
+            log_message "INFO" "Ping test data saved to InfluxDB database $INFLUXDB_DB."
+        else
+            echo -e "${RED}Error: Failed to write ping results to InfluxDB.${NC}"
+            log_message "ERROR" "Failed to save ping test data to InfluxDB."
+        fi
+    }
+
+    perform_ping_test_logic() {
+        for ENDPOINT in $PING_ENDPOINTS; do
+            print_progress "Pinging $ENDPOINT..."
+
+            # Perform ping test
+            PING_OUTPUT=$(ping -c 1 -s 16 $ENDPOINT 2>&1)
+            if [ $? -eq 0 ]; then
+                STATUS="pass"
+                LATENCY_MS=$(echo "$PING_OUTPUT" | grep 'time=' | awk -F'time=' '{print $2}' | awk '{print $1}')
+                ERROR_MESSAGE=""
+            else
+                STATUS="fail"
+                LATENCY_MS=0
+                ERROR_MESSAGE=$(echo "$PING_OUTPUT" | head -1)
+            fi
+
+            # Log and write results
+            print_debug "[$ENDPOINT] - Status: $STATUS, Latency: $LATENCY_MS ms"
+            write_ping_results_to_influxdb
+        done
+    }
+
+    # Main Execution of Ping Test
+    read_ping_endpoints_from_influx
+    if [ $? -ne 0 ]; then
+        echo -e "${YELLOW}Skipping Ping test due to previous errors.${NC}"
+        return 1
+    fi
+    perform_ping_test_logic
+}
+perform_ping_test
 
 # Footer
 echo -e "${CYAN}====================================================${NC}"
