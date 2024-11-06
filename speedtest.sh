@@ -1,15 +1,17 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 3.4.1
-# Date: 05/11/2024
+# Version: 3.5.0
+# Date: 06/11/2024
 
 # Description:
 # This script performs a speed test, DHCP test, DNS test, and ping test, collecting various network metrics.
 # It uploads the results to an InfluxDB server for monitoring.
 # Now includes ISP information retrieved from an external API.
+# Adjusted to reflect changes in the endpoints measurement.
+# Fixed inconsistencies in DHCP test results across different operating systems.
 
 # Version number of the script
-SCRIPT_VERSION="3.4.1"
+SCRIPT_VERSION="3.5.0"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -29,6 +31,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[1;34m'
 CYAN='\033[1;36m'
+MAGENTA='\033[1;35m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
@@ -68,7 +71,7 @@ rotate_log_file
 # Function to check and install dependencies
 check_and_install_dependencies() {
     local missing_dependencies=()
-    local dependencies=("awk" "curl" "jq" "dig" "speedtest-cli" "ping" "ip" "tput" "grep" "sed" "hostname" "date" "sleep" "dhclient")
+    local dependencies=("awk" "curl" "jq" "dig" "speedtest-cli" "ping" "ip" "tput" "grep" "sed" "hostname" "date" "sleep" "dhclient" "ifconfig")
 
     for dep in "${dependencies[@]}"; do
         if ! command -v $dep &> /dev/null; then
@@ -102,6 +105,9 @@ check_and_install_dependencies() {
                     ;;
                 "dhclient")
                     sudo apt-get install -y isc-dhcp-client
+                    ;;
+                "ifconfig")
+                    sudo apt-get install -y net-tools
                     ;;
                 *)
                     sudo apt-get install -y "$dep"
@@ -247,9 +253,9 @@ apply_forced_errors
 update_crontab || log_message "WARN" "update_crontab.sh encountered an error but script will continue."
 
 # Display Title with a Frame
-echo -e "${CYAN}====================================================${NC}"
-echo -e "     ${BOLD}Welcome to VeriNexus Speed Test 2024${NC}"
-echo -e "${CYAN}====================================================${NC}"
+echo -e "${MAGENTA}====================================================${NC}"
+echo -e "     ${BOLD}${MAGENTA}Welcome to VeriNexus Speed Test 2024${NC}"
+echo -e "${MAGENTA}====================================================${NC}"
 echo -e "${YELLOW}(C) 2024 VeriNexus. All Rights Reserved.${NC}"
 echo -e "${YELLOW}Script Version: $SCRIPT_VERSION${NC}"
 
@@ -294,8 +300,11 @@ if [ -n "$ACTIVE_IFACE" ]; then
     if [ -f "/sys/class/net/$ACTIVE_IFACE/address" ]; then
         MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
     else
-        MAC_ADDRESS="N/A"
-        log_message "ERROR" "MAC address file not found for interface $ACTIVE_IFACE."
+        MAC_ADDRESS=$(ifconfig $ACTIVE_IFACE | grep -oP '(?<=ether\s)[\da-fA-F:]{17}' | head -n1)
+        if [ -z "$MAC_ADDRESS" ]; then
+            MAC_ADDRESS="N/A"
+            log_message "ERROR" "MAC address not found for interface $ACTIVE_IFACE."
+        fi
     fi
     LAN_IP=$(ip addr show $ACTIVE_IFACE | grep "inet " | awk '{print $2}' | cut -d/ -f1)
 else
@@ -456,13 +465,13 @@ perform_dhcp_test() {
 
         # Capture current IP and lease information
         IP_ADDR=$(ip addr show $ACTIVE_IFACE | grep "inet " | awk '{print $2}' | cut -d'/' -f1)
-        GATEWAY=$(ip route show default | awk '{print $3}')
+        GATEWAY=$(ip route show default | grep $ACTIVE_IFACE | awk '{print $3}')
 
         # Attempt to capture DNS from resolv.conf
         DNS=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')
 
-        # Extract lease duration from DHCP output
-        LEASE_DURATION=$(echo "$DHCP_OUTPUT" | grep -oP 'renewal in \K[0-9]+')
+        # Extract lease duration from DHCP output (compatible across systems)
+        LEASE_DURATION=$(grep -oP 'expires.*in\s+\K[\d]+' dhcp_renew.log | head -1)
         LEASE_DURATION=${LEASE_DURATION:-"N/A"}
 
         STATUS="pass"
@@ -526,8 +535,9 @@ perform_dns_test() {
     read_endpoints_from_influx() {
         print_progress "Reading DNS servers and FQDNs from InfluxDB..."
 
-        # Query InfluxDB for DNS servers
-        local dns_query='SELECT last("field_check_dns_server") FROM "endpoints" WHERE "field_check_dns_server" = true GROUP BY "tag_endpoint"'
+        # Adjusted queries to reflect changes in the endpoints measurement
+        # Now we need to use fields instead of tags for endpoint data
+        local dns_query='SELECT "field_endpoint" FROM "endpoints" WHERE "field_check_dns_server" = true'
         print_debug "DNS Query: $dns_query"
 
         local dns_query_result=$(curl -sG "$INFLUXDB_SERVER/query" \
@@ -536,7 +546,7 @@ perform_dns_test() {
         print_debug "DNS Query Result: $dns_query_result"
 
         if echo "$dns_query_result" | jq -e '.results[0].series' >/dev/null 2>&1; then
-            DNS_SERVERS=$(echo "$dns_query_result" | jq -r '.results[0].series[].tags.tag_endpoint')
+            DNS_SERVERS=$(echo "$dns_query_result" | jq -r '.results[0].series[].values[][1]')
         else
             echo -e "${RED}Error: No valid DNS servers found for testing.${NC}"
             log_message "ERROR" "No valid DNS servers found for testing."
@@ -544,7 +554,7 @@ perform_dns_test() {
         fi
 
         # Query InfluxDB for FQDNs to resolve
-        local fqdn_query='SELECT last("field_check_name_resolution") FROM "endpoints" WHERE "field_check_name_resolution" = true GROUP BY "tag_endpoint"'
+        local fqdn_query='SELECT "field_endpoint" FROM "endpoints" WHERE "field_check_name_resolution" = true'
         print_debug "FQDN Query: $fqdn_query"
 
         local fqdn_query_result=$(curl -sG "$INFLUXDB_SERVER/query" \
@@ -553,7 +563,7 @@ perform_dns_test() {
         print_debug "FQDN Query Result: $fqdn_query_result"
 
         if echo "$fqdn_query_result" | jq -e '.results[0].series' >/dev/null 2>&1; then
-            FQDNS=$(echo "$fqdn_query_result" | jq -r '.results[0].series[].tags.tag_endpoint')
+            FQDNS=$(echo "$fqdn_query_result" | jq -r '.results[0].series[].values[][1]')
         else
             echo -e "${RED}Error: No valid FQDNs found for testing.${NC}"
             log_message "ERROR" "No valid FQDNs found for testing."
@@ -573,7 +583,9 @@ perform_dns_test() {
     }
 
     write_dns_results_to_influxdb() {
-        local DNS_INFLUX_DATA="$MEASUREMENT,tag_dns_server=$DNS_SERVER,tag_fqdn=$FQDN,tag_test_id=$TEST_ID,tag_mac_address=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
+        local ESCAPED_DNS_SERVER=$(escape_tag_value "$DNS_SERVER")
+        local ESCAPED_FQDN=$(escape_tag_value "$FQDN")
+        local DNS_INFLUX_DATA="$MEASUREMENT,tag_dns_server=$ESCAPED_DNS_SERVER,tag_fqdn=$ESCAPED_FQDN,tag_test_id=$TEST_ID,tag_mac_address=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
 
         local FIELDS=""
         FIELDS+="field_status=\"$STATUS\",field_total_time=$TOTAL_TIME_MS,field_query_time=$QUERY_TIME,field_authority=\"$AUTHORITY_STATUS\""
@@ -634,7 +646,7 @@ perform_dns_test() {
                     ERROR_MESSAGE=$(echo "$DNS_RESPONSE" | grep -m 1 ";;" || echo "N/A")
                 fi
 
-                # Slimmed-down output for users and detailed debug info for logs
+                # Log and write results
                 print_debug "[$DNS_SERVER | $FQDN] - Status: $STATUS, Total Time: $TOTAL_TIME_MS ms, Query Time: $QUERY_TIME ms"
 
                 # Write results to InfluxDB
@@ -670,8 +682,8 @@ perform_ping_test() {
     read_ping_endpoints_from_influx() {
         print_progress "Reading ping endpoints from InfluxDB..."
 
-        # Query InfluxDB for endpoints to ping
-        local ping_query='SELECT last("field_check_ping") FROM "endpoints" WHERE "field_check_ping" = true GROUP BY "tag_endpoint"'
+        # Adjusted query to reflect changes in the endpoints measurement
+        local ping_query='SELECT "field_endpoint" FROM "endpoints" WHERE "field_check_ping" = true'
         print_debug "Ping Query: $ping_query"
 
         local ping_query_result=$(curl -sG "$INFLUXDB_SERVER/query" \
@@ -680,7 +692,7 @@ perform_ping_test() {
         print_debug "Ping Query Result: $ping_query_result"
 
         if echo "$ping_query_result" | jq -e '.results[0].series' >/dev/null 2>&1; then
-            PING_ENDPOINTS=$(echo "$ping_query_result" | jq -r '.results[0].series[].tags.tag_endpoint')
+            PING_ENDPOINTS=$(echo "$ping_query_result" | jq -r '.results[0].series[].values[][1]')
         else
             echo -e "${RED}Error: No valid endpoints found for ping testing.${NC}"
             log_message "ERROR" "No valid endpoints found for ping testing."
@@ -691,7 +703,8 @@ perform_ping_test() {
     }
 
     write_ping_results_to_influxdb() {
-        local PING_INFLUX_DATA="$MEASUREMENT,tag_endpoint=$ENDPOINT,tag_mac_address=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
+        local ESCAPED_ENDPOINT=$(escape_tag_value "$ENDPOINT")
+        local PING_INFLUX_DATA="$MEASUREMENT,tag_endpoint=$ESCAPED_ENDPOINT,tag_mac_address=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
 
         local FIELDS=""
         FIELDS+="field_status=\"$STATUS\",field_latency_ms=$LATENCY_MS"
@@ -755,9 +768,9 @@ perform_ping_test() {
 perform_ping_test
 
 # Footer
-echo -e "${CYAN}====================================================${NC}"
-echo -e "${BOLD}VeriNexus Speed Test Completed Successfully!${NC}"
-echo -e "${CYAN}====================================================${NC}"
+echo -e "${MAGENTA}====================================================${NC}"
+echo -e "${BOLD}${MAGENTA}VeriNexus Speed Test Completed Successfully!${NC}"
+echo -e "${MAGENTA}====================================================${NC}"
 
 # Exit script
 exit 0
