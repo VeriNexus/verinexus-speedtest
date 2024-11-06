@@ -1,6 +1,6 @@
 <!-- index.html -->
-<!-- Version: 1.22.0 -->
-<!-- Date: 07/11/2024 -->
+<!-- Version: 1.23.0 -->
+<!-- Date: 06/11/2024 -->
 <!-- Description: Endpoint management interface with professional and security-focused design -->
 
 <!DOCTYPE html>
@@ -180,7 +180,8 @@
             <div style="display: inline-block; vertical-align: top; margin-top: 10px;">
                 <label><input type="checkbox" name="check_ping" id="check_ping" {% if form_data.check_ping %}checked{% endif %}> Ping</label><br>
                 <label><input type="checkbox" name="check_name_resolution" id="check_name_resolution" {% if form_data.check_name_resolution %}checked{% endif %}> Name Resolution</label><br>
-                <label><input type="checkbox" name="check_dns_server" id="check_dns_server" {% if form_data.check_dns_server %}checked{% endif %}> DNS Server Response</label>
+                <label><input type="checkbox" name="check_dns_server" id="check_dns_server" {% if form_data.check_dns_server %}checked{% endif %}> DNS Server Response</label><br>
+                <label><input type="checkbox" name="check_traceroute" id="check_traceroute" {% if form_data.check_traceroute %}checked{% endif %}> Traceroute</label>
             </div>
             <br><br>
             <input type="submit" value="Add Endpoint">
@@ -194,6 +195,7 @@
                 <th>Ping</th>
                 <th>Name Resolution</th>
                 <th>DNS Server</th>
+                <th>Traceroute</th>
                 <th>Actions</th>
             </tr>
             {% for point in points %}
@@ -203,6 +205,7 @@
                 <td>{{ 'Yes' if point.check_ping else 'No' }}</td>
                 <td>{{ 'Yes' if point.check_name_resolution else 'No' }}</td>
                 <td>{{ 'Yes' if point.check_dns_server else 'No' }}</td>
+                <td>{{ 'Yes' if point.check_traceroute else 'No' }}</td>
                 <td>
                     <form action="{{ url_for('delete_endpoint') }}" method="post" style="display:inline;" onsubmit="return confirmDeletion('{{ point.endpoint }}', '{{ point.type }}');">
                         <input type="hidden" name="endpoint_id" value="{{ point.id }}">

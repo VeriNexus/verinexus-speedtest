@@ -1,6 +1,6 @@
 # admin_app.py
-# Version: 1.22.0
-# Date: 07/11/2024
+# Version: 1.23.0
+# Date: 06/11/2024
 # Description:
 # Flask application for managing devices in the VeriNexus Speed Test system.
 # Changes:
@@ -63,7 +63,8 @@ def create_database_if_not_exists(db_name):
                     "field_endpoint": "example.com",
                     "field_check_ping": True,
                     "field_check_name_resolution": True,
-                    "field_check_dns_server": True
+                    "field_check_dns_server": True,
+                    "field_check_traceroute": True
                 }
             }
         ]
@@ -92,7 +93,8 @@ def index():
             'type': point.get('field_type'),
             'check_ping': point.get('field_check_ping'),
             'check_name_resolution': point.get('field_check_name_resolution'),
-            'check_dns_server': point.get('field_check_dns_server')
+            'check_dns_server': point.get('field_check_dns_server'),
+            'check_traceroute': point.get('field_check_traceroute')
         }
         points.append(point_data)
 
@@ -108,6 +110,7 @@ def add_endpoint():
     check_ping = 'check_ping' in request.form
     check_name_resolution = 'check_name_resolution' in request.form
     check_dns_server = 'check_dns_server' in request.form
+    check_traceroute = 'check_traceroute' in request.form
 
     # Store form data in session to remember inputs
     session['form_data'] = {
@@ -115,11 +118,12 @@ def add_endpoint():
         'endpoint_type': endpoint_type,
         'check_ping': check_ping,
         'check_name_resolution': check_name_resolution,
-        'check_dns_server': check_dns_server
+        'check_dns_server': check_dns_server,
+        'check_traceroute': check_traceroute
     }
 
     # Validate that at least one test is selected
-    if not any([check_ping, check_name_resolution, check_dns_server]):
+    if not any([check_ping, check_name_resolution, check_dns_server, check_traceroute]):
         flash("Please select at least one test to be undertaken.", "error")
         return redirect(url_for('index'))
 
@@ -178,7 +182,8 @@ def add_endpoint():
                 "field_endpoint": endpoint,
                 "field_check_ping": check_ping,
                 "field_check_name_resolution": check_name_resolution,
-                "field_check_dns_server": check_dns_server
+                "field_check_dns_server": check_dns_server,
+                "field_check_traceroute": check_traceroute
             }
         }
     ]
