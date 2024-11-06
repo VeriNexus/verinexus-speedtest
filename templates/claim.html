@@ -1,7 +1,7 @@
 <!-- claim.html -->
-<!-- Version: 1.16.0 -->
-<!-- Date: 05/11/2024 -->
-<!-- Description: Device claiming interface with improved loading of locations -->
+<!-- Version: 1.22.1 -->
+<!-- Date: 07/11/2024 -->
+<!-- Description: Device claiming interface with professional and security-focused design -->
 
 <!DOCTYPE html>
 <html lang="en">
@@ -9,72 +9,104 @@
     <meta charset="UTF-8">
     <title>VeriNexus Admin Panel - Claim Device</title>
     <style>
-        /* Styles for consistent presentation */
+        /* Professional and security-focused styles */
         body {
-            font-family: Arial, sans-serif;
-            background-color: #f2f2f2;
+            font-family: 'Arial', sans-serif;
+            background-color: #f5f5f5;
+            color: #333333;
             margin: 0;
+            padding: 0;
+        }
+        header {
+            background-color: #002b36;
+            color: #ffffff;
             padding: 20px;
+            text-align: center;
         }
-        header, nav, footer {
-            background-color: #004080;
-            color: white;
-            padding: 10px;
-        }
-        h1, h2 {
-            color: #004080;
-        }
-        form {
-            margin-top: 20px;
+        h1 {
+            margin: 0;
+            font-size: 2em;
         }
         .menu a {
-            color: white;
-            margin-right: 15px;
+            color: #ffffff;
+            margin: 0 15px;
             text-decoration: none;
+            font-weight: bold;
         }
-        .flash {
-            padding: 10px;
-            margin-bottom: 10px;
-            border: 1px solid;
-            border-radius: 5px;
+        .menu a:hover {
+            text-decoration: underline;
         }
-        .flash.success {
-            color: green;
-            border-color: green;
-            background-color: #e6ffe6;
+        .container {
+            padding: 20px;
+            max-width: 600px;
+            margin: auto;
         }
-        .flash.error {
-            color: red;
-            border-color: red;
-            background-color: #ffe6e6;
+        h2 {
+            color: #002b36;
+            margin-top: 0;
         }
-        .flash.info {
-            color: #004080;
-            border-color: #004080;
-            background-color: #e6f0ff;
-        }
-        button {
-            background-color: #004080;
-            color: white;
-            padding: 8px 12px;
-            border: none;
-            cursor: pointer;
-            margin-top: 10px;
-        }
-        button:hover {
-            background-color: #003366;
+        form {
+            background-color: #ffffff;
+            padding: 20px;
+            border: 1px solid #cccccc;
         }
         label {
-            display: inline-block;
+            display: block;
             margin-bottom: 5px;
             margin-top: 10px;
         }
         select, input[type="text"] {
-            padding: 5px;
+            padding: 8px;
             margin-bottom: 10px;
+            border: 1px solid #cccccc;
+            border-radius: 5px;
+            width: 100%;
+        }
+        button {
+            background-color: #268bd2;
+            color: #ffffff;
+            padding: 10px 15px;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+            width: 100%;
+            border-radius: 5px;
+        }
+        button:hover {
+            background-color: #007acc;
         }
         .section {
             margin-left: 20px;
+        }
+        footer {
+            background-color: #002b36;
+            color: #ffffff;
+            padding: 10px;
+            text-align: center;
+            position: sticky;
+            bottom: 0;
+        }
+        /* Pop-up message styles */
+        .popup-message {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: #fff4e5;
+            color: #333333;
+            padding: 15px;
+            border: 1px solid #ffa500;
+            border-radius: 5px;
+            z-index: 1000;
+            box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
+        }
+        .popup-message.success {
+            border-color: #4caf50;
+            background-color: #e8f5e9;
+        }
+        .popup-message.error {
+            border-color: #f44336;
+            background-color: #ffebee;
         }
     </style>
     <script>
@@ -127,6 +159,17 @@
             updateLocationOptions();
             updateLocations(); // Ensure locations are loaded on page load
         }
+
+        // Function to display pop-up messages
+        function showMessage(message, category) {
+            var popup = document.createElement('div');
+            popup.className = 'popup-message ' + category;
+            popup.innerHTML = message;
+            document.body.appendChild(popup);
+            setTimeout(function() {
+                popup.remove();
+            }, 5000);
+        }
     </script>
 </head>
 <body>
@@ -140,73 +183,77 @@
         </div>
     </header>
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-        {% for category, message in messages %}
-            <div class="flash {{ category }}">{{ message }}</div>
-        {% endfor %}
-    {% endif %}
-    {% endwith %}
+    <div class="container">
+        <h2>Claim Device</h2>
 
-    <h2>Claim Device</h2>
-
-    {% if unclaimed_macs %}
-    <form method="post">
-        <label for="mac_address">MAC Address:</label><br>
-        <select id="mac_address" name="mac_address" required>
-            {% for mac in unclaimed_macs %}
-            <option value="{{ mac }}">{{ mac }}</option>
-            {% endfor %}
-        </select>
-        <br><br>
-        <label for="friendly_name">Friendly Name:</label><br>
-        <input type="text" id="friendly_name" name="friendly_name" required>
-        <br><br>
-        <label>Customer:</label><br>
-        <input type="radio" id="existing_customer" name="customer_option" value="existing" checked onchange="updateCustomerOptions();">
-        <label for="existing_customer">Existing Customer</label>
-        <div id="existing_customer_section" class="section">
-            <select name="existing_customer_id" id="existing_customer_id" onchange="updateLocations();">
-                {% for id, name in customers.items() %}
-                <option value="{{ id }}">{{ name }} (ID: {{ id }})</option>
+        {% if unclaimed_macs %}
+        <form method="post">
+            <label for="mac_address">MAC Address:</label>
+            <select id="mac_address" name="mac_address" required>
+                {% for mac in unclaimed_macs %}
+                <option value="{{ mac }}">{{ mac }}</option>
                 {% endfor %}
             </select>
-        </div>
-        <br>
-        <input type="radio" id="new_customer" name="customer_option" value="new" onchange="updateCustomerOptions();">
-        <label for="new_customer">New Customer</label>
-        <div id="new_customer_section" class="section" style="display:none;">
-            <input type="text" name="new_customer_name" placeholder="Customer Name">
-            <br><br>
-            <label>Location:</label><br>
-            <input type="text" name="new_customer_location_name" placeholder="Location Name">
-        </div>
-        <br>
-        <div id="location_options">
-            <label>Location:</label><br>
-            <input type="radio" name="location_option" value="existing" checked onchange="updateLocationOptions();">
-            <label>Existing Location</label>
-            <div id="existing_location_section" class="section">
-                <select name="existing_location" id="existing_location">
-                    <!-- Locations will be populated by JavaScript -->
+
+            <label for="friendly_name">Friendly Name:</label>
+            <input type="text" id="friendly_name" name="friendly_name" required>
+
+            <label>Customer:</label>
+            <input type="radio" id="existing_customer" name="customer_option" value="existing" checked onchange="updateCustomerOptions();">
+            <label for="existing_customer">Existing Customer</label>
+            <div id="existing_customer_section" class="section">
+                <select name="existing_customer_id" id="existing_customer_id" onchange="updateLocations();">
+                    {% for id, name in customers.items() %}
+                    <option value="{{ id }}">{{ name }} (ID: {{ id }})</option>
+                    {% endfor %}
                 </select>
             </div>
-            <br>
-            <input type="radio" name="location_option" value="new" onchange="updateLocationOptions();">
-            <label>New Location</label>
-            <div id="new_location_input" class="section" style="display:none;">
-                <input type="text" name="new_location_name" placeholder="Location Name">
+
+            <input type="radio" id="new_customer" name="customer_option" value="new" onchange="updateCustomerOptions();">
+            <label for="new_customer">New Customer</label>
+            <div id="new_customer_section" class="section" style="display:none;">
+                <input type="text" name="new_customer_name" placeholder="Customer Name">
+                <label>Location:</label>
+                <input type="text" name="new_customer_location_name" placeholder="Location Name">
             </div>
-        </div>
-        <br>
-        <button type="submit">Claim Device</button>
-    </form>
-    {% else %}
-    <p>No MAC addresses available to claim.</p>
-    {% endif %}
+
+            <div id="location_options">
+                <label>Location:</label>
+                <input type="radio" name="location_option" value="existing" checked onchange="updateLocationOptions();">
+                <label>Existing Location</label>
+                <div id="existing_location_section" class="section">
+                    <select name="existing_location" id="existing_location">
+                        <!-- Locations will be populated by JavaScript -->
+                    </select>
+                </div>
+
+                <input type="radio" name="location_option" value="new" onchange="updateLocationOptions();">
+                <label>New Location</label>
+                <div id="new_location_input" class="section" style="display:none;">
+                    <input type="text" name="new_location_name" placeholder="Location Name">
+                </div>
+            </div>
+
+            <button type="submit">Claim Device</button>
+        </form>
+        {% else %}
+        <p>No MAC addresses available to claim.</p>
+        {% endif %}
+    </div>
 
     <footer>
         Version: {{ version }} | &copy; 2024 VeriNexus
     </footer>
+
+    <!-- Display pop-up messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <script>
+        {% for category, message in messages %}
+            showMessage("{{ message }}", "{{ category }}");
+        {% endfor %}
+        </script>
+    {% endif %}
+    {% endwith %}
 </body>
 </html>

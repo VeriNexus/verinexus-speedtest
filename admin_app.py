@@ -1,21 +1,25 @@
 # admin_app.py
-# Version: 1.16.0
-# Date: 05/11/2024
+# Version: 1.22.0
+# Date: 07/11/2024
 # Description:
 # Flask application for managing devices in the VeriNexus Speed Test system.
-# Fixes deletion error by storing 'endpoint' as a tag.
-# Enhances user experience with confirmation dialogs and improved error handling.
-# Adds code critique and improvements for better readability and maintenance.
-# Functionality is maintained fully.
+# Changes:
+# - Assigned a unique ID to each endpoint stored as a tag for deletion purposes.
+# - Modified delete functionality to use the unique ID tag.
+# - Kept all other data stored as fields.
+# - UI updated to a professional and security-focused design.
+# - All routes and code are included without any omissions.
 
 import logging
-from flask import Flask, request, render_template, redirect, url_for, flash, jsonify
+from flask import Flask, request, render_template, redirect, url_for, flash, jsonify, session
 from influxdb import InfluxDBClient
 import ipaddress
 import re
+import uuid
+from datetime import datetime
 
 app = Flask(__name__)
-app.secret_key = 'your_secret_key_here'  # Needed for flash messages
+app.secret_key = 'your_secret_key_here'  # Needed for flash messages and sessions
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -47,14 +51,16 @@ def create_database_if_not_exists(db_name):
     measurement_query = f'SELECT COUNT(*) FROM "{ENDPOINTS_MEASUREMENT}"'
     result = client.query(measurement_query)
     if not list(result.get_points()):
+        unique_id = str(uuid.uuid4())
         test_data = [
             {
                 "measurement": ENDPOINTS_MEASUREMENT,
                 "tags": {
-                    "tag_type": "FQDN",
-                    "tag_endpoint": "example.com"
+                    "tag_id": unique_id
                 },
                 "fields": {
+                    "field_type": "FQDN",
+                    "field_endpoint": "example.com",
                     "field_check_ping": True,
                     "field_check_name_resolution": True,
                     "field_check_dns_server": True
@@ -62,14 +68,14 @@ def create_database_if_not_exists(db_name):
             }
         ]
         client.write_points(test_data)
-        logger.info("Added default endpoint 'example.com'.")
+        logger.info("Added default endpoint 'example.com' with unique ID.")
 
 # Ensure the endpoints database exists
 create_database_if_not_exists(ENDPOINTS_DB)
 
 @app.route('/')
 def home():
-    return render_template('home.html', version='1.16.0')
+    return render_template('home.html', version='1.22.0')
 
 @app.route('/endpoints')
 def index():
@@ -78,16 +84,22 @@ def index():
     result = client.query(query)
     points = []
     for point in result.get_points():
-        endpoint = point.get('tag_endpoint') or point.get('field_endpoint')
+        endpoint = point.get('field_endpoint')
+        unique_id = point.get('tag_id')
         point_data = {
+            'id': unique_id,
             'endpoint': endpoint,
-            'type': point.get('tag_type'),
+            'type': point.get('field_type'),
             'check_ping': point.get('field_check_ping'),
             'check_name_resolution': point.get('field_check_name_resolution'),
             'check_dns_server': point.get('field_check_dns_server')
         }
         points.append(point_data)
-    return render_template('index.html', points=points, version='1.16.0')
+
+    # Retrieve any stored form data from session
+    form_data = session.pop('form_data', {})
+
+    return render_template('index.html', points=points, version='1.22.0', form_data=form_data)
 
 @app.route('/add', methods=['POST'])
 def add_endpoint():
@@ -96,6 +108,20 @@ def add_endpoint():
     check_ping = 'check_ping' in request.form
     check_name_resolution = 'check_name_resolution' in request.form
     check_dns_server = 'check_dns_server' in request.form
+
+    # Store form data in session to remember inputs
+    session['form_data'] = {
+        'endpoint': endpoint,
+        'endpoint_type': endpoint_type,
+        'check_ping': check_ping,
+        'check_name_resolution': check_name_resolution,
+        'check_dns_server': check_dns_server
+    }
+
+    # Validate that at least one test is selected
+    if not any([check_ping, check_name_resolution, check_dns_server]):
+        flash("Please select at least one test to be undertaken.", "error")
+        return redirect(url_for('index'))
 
     # Validate the endpoint
     if endpoint_type == 'IP':
@@ -108,10 +134,20 @@ def add_endpoint():
         # For IP addresses, name resolution is not applicable
         check_name_resolution = False
     elif endpoint_type == 'FQDN':
-        # Validate FQDN (simple validation)
-        fqdn_regex = r'^(?=.{1,255}$)([a-z0-9][a-z0-9\-]{0,62}\.)+[a-z]{2,}$'
-        if not re.match(fqdn_regex, endpoint, re.IGNORECASE):
+        # Adjusted FQDN validation to allow single-word hostnames
+        fqdn_regex = r'^(?=.{1,253}$)(?!:\/\/)[a-zA-Z0-9][a-zA-Z0-9\-\.]{0,251}[a-zA-Z0-9]$'
+        if not re.match(fqdn_regex, endpoint):
             flash("Invalid FQDN.", "error")
+            return redirect(url_for('index'))
+        # Ensure the endpoint does not contain IP addresses or schemes
+        try:
+            ipaddress.ip_address(endpoint)
+            flash("FQDN cannot be an IP address.", "error")
+            return redirect(url_for('index'))
+        except ValueError:
+            pass  # Not an IP address, which is good
+        if any(scheme in endpoint.lower() for scheme in ['http://', 'https://']):
+            flash("FQDN should not contain 'http://' or 'https://'.", "error")
             return redirect(url_for('index'))
     else:
         flash("Invalid endpoint type.", "error")
@@ -120,22 +156,26 @@ def add_endpoint():
     client.switch_database(ENDPOINTS_DB)  # Ensure we're on the correct database
 
     # Check if endpoint already exists
-    existing_query = f'SELECT * FROM "{ENDPOINTS_MEASUREMENT}" WHERE "tag_endpoint" = \'{endpoint}\''
+    existing_query = f'SELECT * FROM "{ENDPOINTS_MEASUREMENT}" WHERE "field_endpoint" = \'{endpoint}\' AND "field_type" = \'{endpoint_type}\''
     existing_result = client.query(existing_query)
     existing_points = list(existing_result.get_points())
     if existing_points:
         flash("Endpoint already exists.", "error")
         return redirect(url_for('index'))
 
-    # Store endpoint as a tag for deletion
+    # Generate a unique ID for the endpoint
+    unique_id = str(uuid.uuid4())
+
+    # Store endpoint data with unique ID as a tag
     json_body = [
         {
             "measurement": ENDPOINTS_MEASUREMENT,
             "tags": {
-                "tag_type": endpoint_type,
-                "tag_endpoint": endpoint
+                "tag_id": unique_id
             },
             "fields": {
+                "field_type": endpoint_type,
+                "field_endpoint": endpoint,
                 "field_check_ping": check_ping,
                 "field_check_name_resolution": check_name_resolution,
                 "field_check_dns_server": check_dns_server
@@ -144,24 +184,30 @@ def add_endpoint():
     ]
     client.write_points(json_body)
     flash("Endpoint added successfully.", "success")
+
+    # Remember the type selection for the next entry
+    session['form_data'] = {'endpoint_type': endpoint_type}
+
     return redirect(url_for('index'))
 
 @app.route('/delete', methods=['POST'])
 def delete_endpoint():
-    endpoint = request.form['endpoint']
-    endpoint_type = request.form['endpoint_type']
+    endpoint_id = request.form['endpoint_id']
     client.switch_database(ENDPOINTS_DB)  # Ensure we're on the correct database
-    query = f"DELETE FROM \"{ENDPOINTS_MEASUREMENT}\" WHERE \"tag_endpoint\"='{endpoint}' AND \"tag_type\"='{endpoint_type}'"
-    try:
-        client.query(query)
-        flash("Endpoint deleted successfully.", "success")
-    except Exception as e:
-        logger.exception("Error deleting endpoint.")
-        flash(f"Error deleting endpoint: {str(e)}", "error")
+
+    logger.debug(f"Attempting to delete endpoint with ID '{endpoint_id}'")
+
+    # Delete the point based on the unique ID tag
+    delete_query = f'DELETE FROM "{ENDPOINTS_MEASUREMENT}" WHERE "tag_id" = \'{endpoint_id}\''
+    client.query(delete_query)
+    logger.debug(f"Deleted endpoint with ID '{endpoint_id}'")
+
+    flash("Endpoint deleted successfully.", "success")
     return redirect(url_for('index'))
 
 @app.route('/claim', methods=['GET'])
 def claim_device():
+    # Existing code remains unchanged...
     client.switch_database(SPEEDTEST_DB)
     logger.debug(f"Switched to database: {SPEEDTEST_DB}")
 
@@ -218,7 +264,7 @@ def claim_device():
         customer_name = point.get('field_customer_name')
         location = point.get('field_location')
         if customer_id is not None and customer_name:
-            customer_id_str = str(int(customer_id))  # Ensure customer_id is treated as an integer
+            customer_id_str = str(int(customer_id))  # Ensure customer_id is treated as integer
             customers[customer_id_str] = customer_name
             if customer_id_str not in locations:
                 locations[customer_id_str] = set()
@@ -236,10 +282,11 @@ def claim_device():
     client.switch_database(ENDPOINTS_DB)
 
     # Pass the data to the template
-    return render_template('claim.html', unclaimed_macs=unclaimed_macs, customers=customers, locations=locations, version='1.16.0')
+    return render_template('claim.html', unclaimed_macs=unclaimed_macs, customers=customers, locations=locations, version='1.22.0')
 
 @app.route('/claim', methods=['POST'])
 def claim_device_post():
+    # Existing code remains unchanged...
     try:
         mac_address = request.form['mac_address']
         customer_option = request.form['customer_option']
@@ -301,7 +348,7 @@ def claim_device_post():
                 if max_customer_id is None:
                     max_customer_id = 0
                 else:
-                    max_customer_id = int(max_customer_id)  # Ensure max_customer_id is treated as an integer
+                    max_customer_id = int(max_customer_id)  # Ensure max_customer_id is treated as integer
             customer_id = max_customer_id + 1
 
             # For new customer, location is always new
@@ -356,6 +403,7 @@ def claim_device_post():
 
 @app.route('/get_locations', methods=['GET'])
 def get_locations():
+    # Existing code remains unchanged...
     customer_id = request.args.get('customer_id')
     if not customer_id:
         return jsonify({'locations': []})
@@ -372,6 +420,7 @@ def get_locations():
 
 @app.route('/revoke', methods=['GET'])
 def revoke_device_get():
+    # Existing code remains unchanged...
     client.switch_database(SPEEDTEST_DB)
     # Retrieve all claimed devices
     devices_query = f'SELECT * FROM "{DEVICES_MEASUREMENT}"'
@@ -410,10 +459,11 @@ def revoke_device_get():
     # Switch back to ENDPOINTS_DB
     client.switch_database(ENDPOINTS_DB)
 
-    return render_template('revoke.html', devices=devices, version='1.16.0', filter_column=filter_column, filter_value=filter_value, sort_column=sort_column, sort_order=sort_order)
+    return render_template('revoke.html', devices=devices, version='1.22.0', filter_column=filter_column, filter_value=filter_value, sort_column=sort_column, sort_order=sort_order)
 
 @app.route('/revoke', methods=['POST'])
 def revoke_device_post():
+    # Existing code remains unchanged...
     try:
         client.switch_database(SPEEDTEST_DB)
         selected_macs = request.form.getlist('selected_macs')

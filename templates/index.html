@@ -1,7 +1,7 @@
 <!-- index.html -->
-<!-- Version: 1.16.0 -->
-<!-- Date: 05/11/2024 -->
-<!-- Description: Endpoint management interface with confirmation dialog for deletions -->
+<!-- Version: 1.22.0 -->
+<!-- Date: 07/11/2024 -->
+<!-- Description: Endpoint management interface with professional and security-focused design -->
 
 <!DOCTYPE html>
 <html lang="en">
@@ -9,93 +9,151 @@
     <meta charset="UTF-8">
     <title>VeriNexus Admin Panel - Endpoints</title>
     <style>
-        /* Styles for consistent presentation */
+        /* Professional and security-focused styles */
         body {
-            font-family: Arial, sans-serif;
-            background-color: #f2f2f2;
+            font-family: 'Arial', sans-serif;
+            background-color: #f5f5f5;
+            color: #333333;
             margin: 0;
+            padding: 0;
+        }
+        header {
+            background-color: #002b36;
+            color: #ffffff;
+            padding: 20px;
+            text-align: center;
+            position: sticky;
+            top: 0;
+        }
+        h1 {
+            margin: 0;
+            font-size: 2em;
+        }
+        .menu a {
+            color: #ffffff;
+            margin: 0 15px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .menu a:hover {
+            text-decoration: underline;
+        }
+        .container {
             padding: 20px;
         }
-        header, nav, footer {
-            background-color: #004080;
-            color: white;
-            padding: 10px;
+        h2 {
+            color: #002b36;
+            margin-top: 0;
         }
-        h1, h2 {
-            color: #004080;
+        form {
+            background-color: #ffffff;
+            padding: 20px;
+            border: 1px solid #cccccc;
+            margin-bottom: 20px;
+        }
+        label {
+            display: inline-block;
+            width: 150px;
+            vertical-align: top;
+            margin-top: 10px;
+        }
+        input[type="text"], select {
+            width: 300px;
+            padding: 8px;
+            margin-top: 5px;
+            margin-bottom: 10px;
+            border: 1px solid #cccccc;
+            border-radius: 4px;
+        }
+        input[type="checkbox"] {
+            margin-top: 12px;
+        }
+        button, input[type="submit"] {
+            background-color: #268bd2;
+            color: #ffffff;
+            padding: 10px 20px;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+            border-radius: 4px;
+        }
+        button:hover, input[type="submit"]:hover {
+            background-color: #007acc;
         }
         table {
             width: 100%;
             border-collapse: collapse;
-            background-color: white;
-        }
-        table, th, td {
-            border: 1px solid #cccccc;
+            background-color: #ffffff;
         }
         th, td {
-            padding: 8px;
+            border: 1px solid #cccccc;
+            padding: 10px;
             text-align: left;
         }
-        form {
-            margin-top: 20px;
+        th {
+            background-color: #002b36;
+            color: #ffffff;
         }
-        .menu a {
-            color: white;
-            margin-right: 15px;
-            text-decoration: none;
-        }
-        .flash {
+        footer {
+            background-color: #002b36;
+            color: #ffffff;
             padding: 10px;
-            margin-bottom: 10px;
-            border: 1px solid;
+            text-align: center;
+            position: sticky;
+            bottom: 0;
+        }
+        /* Pop-up message styles */
+        .popup-message {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: #fff4e5;
+            color: #333333;
+            padding: 15px;
+            border: 1px solid #ffa500;
             border-radius: 5px;
+            z-index: 1000;
+            box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
         }
-        .flash.success {
-            color: green;
-            border-color: green;
-            background-color: #e6ffe6;
+        .popup-message.success {
+            border-color: #4caf50;
+            background-color: #e8f5e9;
         }
-        .flash.error {
-            color: red;
-            border-color: red;
-            background-color: #ffe6e6;
-        }
-        .flash.info {
-            color: #004080;
-            border-color: #004080;
-            background-color: #e6f0ff;
-        }
-        button {
-            background-color: #004080;
-            color: white;
-            padding: 8px 12px;
-            border: none;
-            cursor: pointer;
-        }
-        button:hover {
-            background-color: #003366;
-        }
-        input[type="text"], select {
-            padding: 5px;
-            margin-right: 10px;
-        }
-        label {
-            margin-right: 10px;
+        .popup-message.error {
+            border-color: #f44336;
+            background-color: #ffebee;
         }
     </style>
     <script>
-        function confirmDeletion(endpoint, type) {
-            if (confirm(`Are you sure you want to delete the endpoint '${endpoint}' of type '${type}'?`)) {
-                // Proceed with form submission
-                return true;
+        function toggleNameResolution() {
+            var endpointType = document.getElementById('endpoint_type').value;
+            var nameResolutionCheckbox = document.getElementById('check_name_resolution');
+            if (endpointType === 'IP') {
+                nameResolutionCheckbox.checked = false;
+                nameResolutionCheckbox.disabled = true;
             } else {
-                // Cancel form submission
-                return false;
+                nameResolutionCheckbox.disabled = false;
             }
+        }
+
+        function confirmDeletion(endpoint, type) {
+            return confirm(`Are you sure you want to delete the endpoint '${endpoint}' of type '${type}'?`);
+        }
+
+        // Function to display pop-up messages
+        function showMessage(message, category) {
+            var popup = document.createElement('div');
+            popup.className = 'popup-message ' + category;
+            popup.innerHTML = message;
+            document.body.appendChild(popup);
+            setTimeout(function() {
+                popup.remove();
+            }, 5000);
         }
     </script>
 </head>
-<body>
+<body onload="toggleNameResolution()">
     <header>
         <h1>VeriNexus Admin Panel</h1>
         <div class="menu">
@@ -106,61 +164,69 @@
         </div>
     </header>
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-        {% for category, message in messages %}
-            <div class="flash {{ category }}">{{ message }}</div>
-        {% endfor %}
-    {% endif %}
-    {% endwith %}
+    <div class="container">
+        <h2>Manage Endpoints</h2>
+        <form action="{{ url_for('add_endpoint') }}" method="post">
+            <label for="endpoint">Endpoint:</label>
+            <input type="text" id="endpoint" name="endpoint" required value="{{ form_data.endpoint or '' }}">
+            <br>
+            <label for="endpoint_type">Type:</label>
+            <select id="endpoint_type" name="endpoint_type" required onchange="toggleNameResolution()">
+                <option value="IP" {% if form_data.endpoint_type == 'IP' %}selected{% endif %}>IP</option>
+                <option value="FQDN" {% if form_data.endpoint_type == 'FQDN' %}selected{% endif %}>FQDN</option>
+            </select>
+            <br>
+            <label>Tests to be undertaken:</label>
+            <div style="display: inline-block; vertical-align: top; margin-top: 10px;">
+                <label><input type="checkbox" name="check_ping" id="check_ping" {% if form_data.check_ping %}checked{% endif %}> Ping</label><br>
+                <label><input type="checkbox" name="check_name_resolution" id="check_name_resolution" {% if form_data.check_name_resolution %}checked{% endif %}> Name Resolution</label><br>
+                <label><input type="checkbox" name="check_dns_server" id="check_dns_server" {% if form_data.check_dns_server %}checked{% endif %}> DNS Server Response</label>
+            </div>
+            <br><br>
+            <input type="submit" value="Add Endpoint">
+        </form>
 
-    <h2>Manage Endpoints</h2>
-    <form action="/add" method="post">
-        <label for="endpoint">Endpoint:</label>
-        <input type="text" id="endpoint" name="endpoint" required>
-        <label for="endpoint_type">Type:</label>
-        <select id="endpoint_type" name="endpoint_type" required>
-            <option value="IP">IP</option>
-            <option value="FQDN">FQDN</option>
-        </select>
-        <br><br>
-        <label><input type="checkbox" name="check_ping"> Ping</label>
-        <label><input type="checkbox" name="check_name_resolution"> Name Resolution</label>
-        <label><input type="checkbox" name="check_dns_server"> DNS Server Response</label>
-        <br><br>
-        <button type="submit">Add Endpoint</button>
-    </form>
-
-    <h2>Existing Endpoints</h2>
-    <table>
-        <tr>
-            <th>Endpoint</th>
-            <th>Type</th>
-            <th>Ping</th>
-            <th>Name Resolution</th>
-            <th>DNS Server Response</th>
-            <th>Actions</th>
-        </tr>
-        {% for point in points %}
-        <tr>
-            <td>{{ point.endpoint }}</td>
-            <td>{{ point.type }}</td>
-            <td>{{ 'Yes' if point.check_ping else 'No' }}</td>
-            <td>{{ 'Yes' if point.check_name_resolution else 'No' }}</td>
-            <td>{{ 'Yes' if point.check_dns_server else 'No' }}</td>
-            <td>
-                <form action="/delete" method="post" style="display:inline;" onsubmit="return confirmDeletion('{{ point.endpoint }}', '{{ point.type }}');">
-                    <input type="hidden" name="endpoint" value="{{ point.endpoint }}">
-                    <input type="hidden" name="endpoint_type" value="{{ point.type }}">
-                    <button type="submit">Delete</button>
-                </form>
-            </td>
-        </tr>
-        {% endfor %}
-    </table>
+        <h2>Existing Endpoints</h2>
+        <table>
+            <tr>
+                <th>Endpoint</th>
+                <th>Type</th>
+                <th>Ping</th>
+                <th>Name Resolution</th>
+                <th>DNS Server</th>
+                <th>Actions</th>
+            </tr>
+            {% for point in points %}
+            <tr>
+                <td>{{ point.endpoint }}</td>
+                <td>{{ point.type }}</td>
+                <td>{{ 'Yes' if point.check_ping else 'No' }}</td>
+                <td>{{ 'Yes' if point.check_name_resolution else 'No' }}</td>
+                <td>{{ 'Yes' if point.check_dns_server else 'No' }}</td>
+                <td>
+                    <form action="{{ url_for('delete_endpoint') }}" method="post" style="display:inline;" onsubmit="return confirmDeletion('{{ point.endpoint }}', '{{ point.type }}');">
+                        <input type="hidden" name="endpoint_id" value="{{ point.id }}">
+                        <button type="submit">Delete</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </table>
+    </div>
 
     <footer>
         Version: {{ version }} | &copy; 2024 VeriNexus
     </footer>
+
+    <!-- Display pop-up messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <script>
+        {% for category, message in messages %}
+            showMessage("{{ message }}", "{{ category }}");
+        {% endfor %}
+        </script>
+    {% endif %}
+    {% endwith %}
 </body>
 </html>

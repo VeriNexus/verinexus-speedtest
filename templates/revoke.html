@@ -1,7 +1,7 @@
 <!-- revoke.html -->
-<!-- Version: 1.16.0 -->
-<!-- Date: 05/11/2024 -->
-<!-- Description: Device revocation interface with sorting and filtering capabilities -->
+<!-- Version: 1.22.1 -->
+<!-- Date: 07/11/2024 -->
+<!-- Description: Device revocation interface with professional and security-focused design -->
 
 <!DOCTYPE html>
 <html lang="en">
@@ -9,108 +9,108 @@
     <meta charset="UTF-8">
     <title>VeriNexus Admin Panel - Revoke Devices</title>
     <style>
-        /* Styles for consistent presentation */
+        /* Professional and security-focused styles */
         body {
-            font-family: Arial, sans-serif;
-            background-color: #f2f2f2;
+            font-family: 'Arial', sans-serif;
+            background-color: #f5f5f5;
+            color: #333333;
             margin: 0;
+            padding: 0;
+        }
+        header {
+            background-color: #002b36;
+            color: #ffffff;
+            padding: 20px;
+            text-align: center;
+            position: sticky;
+            top: 0;
+        }
+        h1 {
+            margin: 0;
+            font-size: 2em;
+        }
+        .menu a {
+            color: #ffffff;
+            margin: 0 15px;
+            text-decoration: none;
+            font-weight: bold;
+        }
+        .menu a:hover {
+            text-decoration: underline;
+        }
+        .container {
             padding: 20px;
         }
-        header, nav, footer {
-            background-color: #004080;
-            color: white;
-            padding: 10px;
-        }
-        h1, h2 {
-            color: #004080;
+        h2 {
+            color: #002b36;
+            margin-top: 0;
         }
         table {
             width: 100%;
             border-collapse: collapse;
-            background-color: white;
-            margin-bottom: 20px;
+            background-color: #ffffff;
+            margin-top: 20px;
         }
         table, th, td {
             border: 1px solid #cccccc;
         }
-        th {
-            padding: 8px;
+        th, td {
+            padding: 10px;
             text-align: left;
-            background-color: #e6f0ff;
-            cursor: pointer;
         }
-        td {
-            padding: 8px;
-            text-align: left;
+        th {
+            background-color: #002b36;
+            color: #ffffff;
+            cursor: pointer;
         }
         form {
             margin-top: 20px;
-        }
-        .menu a {
-            color: white;
-            margin-right: 15px;
-            text-decoration: none;
-        }
-        .flash {
-            padding: 10px;
-            margin-bottom: 10px;
-            border: 1px solid;
-            border-radius: 5px;
-        }
-        .flash.success {
-            color: green;
-            border-color: green;
-            background-color: #e6ffe6;
-        }
-        .flash.error {
-            color: red;
-            border-color: red;
-            background-color: #ffe6e6;
-        }
-        .flash.info {
-            color: #004080;
-            border-color: #004080;
-            background-color: #e6f0ff;
-        }
-        button {
-            background-color: #004080;
-            color: white;
-            padding: 8px 12px;
-            border: none;
-            cursor: pointer;
-            margin-top: 10px;
-        }
-        button:hover {
-            background-color: #003366;
-        }
-        input[type="text"], select {
-            padding: 5px;
-            margin-right: 10px;
+            background-color: #ffffff;
+            padding: 20px;
+            border: 1px solid #cccccc;
         }
         label {
             margin-right: 10px;
         }
-        .sortable:hover {
-            background-color: #d0e0f0;
+        select, input[type="text"] {
+            padding: 8px;
+            margin-right: 10px;
+            border: 1px solid #cccccc;
+            border-radius: 5px;
         }
-        .sortable {
-            position: relative;
+        button {
+            background-color: #268bd2;
+            color: #ffffff;
+            padding: 10px 15px;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+            border-radius: 5px;
         }
-        .sortable:after {
-            content: '';
-            position: absolute;
-            right: 8px;
-            top: 50%;
-            width: 0;
-            height: 0;
-            border-style: solid;
-            border-width: 5px 4px 0 4px;
-            border-color: #666666 transparent transparent transparent;
-            transform: translateY(-50%);
+        button:hover {
+            background-color: #007acc;
         }
-        .sortable.desc:after {
-            border-width: 0 4px 5px 4px;
-            border-color: transparent transparent #666666 transparent;
+        /* Pop-up message styles */
+        .popup-message {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background-color: #fff4e5;
+            color: #333333;
+            padding: 15px;
+            border: 1px solid #ffa500;
+            border-radius: 5px;
+            z-index: 1000;
+            box-shadow: 0px 0px 10px rgba(0,0,0,0.1);
+        }
+        .popup-message.success {
+            border-color: #4caf50;
+            background-color: #e8f5e9;
+        }
+        .popup-message.error {
+            border-color: #f44336;
+            background-color: #ffebee;
         }
     </style>
     <script>
@@ -126,6 +126,17 @@
             url.searchParams.set('sort_order', newSortOrder);
             window.location.href = url.toString();
         }
+
+        // Function to display pop-up messages
+        function showMessage(message, category) {
+            var popup = document.createElement('div');
+            popup.className = 'popup-message ' + category;
+            popup.innerHTML = message;
+            document.body.appendChild(popup);
+            setTimeout(function() {
+                popup.remove();
+            }, 5000);
+        }
     </script>
 </head>
 <body>
@@ -139,59 +150,64 @@
         </div>
     </header>
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-    {% if messages %}
-        {% for category, message in messages %}
-            <div class="flash {{ category }}">{{ message }}</div>
-        {% endfor %}
-    {% endif %}
-    {% endwith %}
+    <div class="container">
+        <h2>Revoke Devices</h2>
 
-    <h2>Revoke Devices</h2>
+        {% if devices %}
+        <form method="get" action="{{ url_for('revoke_device_get') }}">
+            <label for="filter_column">Filter By:</label>
+            <select id="filter_column" name="filter_column">
+                <option value="mac_address" {% if filter_column == 'mac_address' %}selected{% endif %}>MAC Address</option>
+                <option value="customer_id" {% if filter_column == 'customer_id' %}selected{% endif %}>Customer ID</option>
+                <option value="customer_name" {% if filter_column == 'customer_name' %}selected{% endif %}>Customer Name</option>
+                <option value="friendly_name" {% if filter_column == 'friendly_name' %}selected{% endif %}>Friendly Name</option>
+                <option value="location" {% if filter_column == 'location' %}selected{% endif %}>Location</option>
+            </select>
+            <input type="text" name="filter_value" value="{{ filter_value }}">
+            <button type="submit">Filter</button>
+        </form>
 
-    {% if devices %}
-    <form method="get" action="{{ url_for('revoke_device_get') }}">
-        <label for="filter_column">Filter By:</label>
-        <select id="filter_column" name="filter_column">
-            <option value="mac_address" {% if filter_column == 'mac_address' %}selected{% endif %}>MAC Address</option>
-            <option value="customer_id" {% if filter_column == 'customer_id' %}selected{% endif %}>Customer ID</option>
-            <option value="customer_name" {% if filter_column == 'customer_name' %}selected{% endif %}>Customer Name</option>
-            <option value="friendly_name" {% if filter_column == 'friendly_name' %}selected{% endif %}>Friendly Name</option>
-            <option value="location" {% if filter_column == 'location' %}selected{% endif %}>Location</option>
-        </select>
-        <input type="text" name="filter_value" value="{{ filter_value }}">
-        <button type="submit">Filter</button>
-    </form>
-
-    <form method="post">
-        <table>
-            <tr>
-                <th onclick="sortTable('mac_address')" class="sortable {% if sort_column == 'mac_address' %}{{ sort_order }}{% endif %}">MAC Address</th>
-                <th onclick="sortTable('customer_id')" class="sortable {% if sort_column == 'customer_id' %}{{ sort_order }}{% endif %}">Customer ID</th>
-                <th onclick="sortTable('customer_name')" class="sortable {% if sort_column == 'customer_name' %}{{ sort_order }}{% endif %}">Customer Name</th>
-                <th onclick="sortTable('friendly_name')" class="sortable {% if sort_column == 'friendly_name' %}{{ sort_order }}{% endif %}">Friendly Name</th>
-                <th onclick="sortTable('location')" class="sortable {% if sort_column == 'location' %}{{ sort_order }}{% endif %}">Location</th>
-                <th>Revoke</th>
-            </tr>
-            {% for device in devices %}
-            <tr>
-                <td>{{ device.mac_address }}</td>
-                <td>{{ device.customer_id }}</td>
-                <td>{{ device.customer_name }}</td>
-                <td>{{ device.friendly_name }}</td>
-                <td>{{ device.location }}</td>
-                <td><input type="checkbox" name="selected_macs" value="{{ device.mac_address }}"></td>
-            </tr>
-            {% endfor %}
-        </table>
-        <button type="submit">Revoke Selected Devices</button>
-    </form>
-    {% else %}
-    <p>No devices to revoke.</p>
-    {% endif %}
+        <form method="post">
+            <table>
+                <tr>
+                    <th onclick="sortTable('mac_address')">MAC Address</th>
+                    <th onclick="sortTable('customer_id')">Customer ID</th>
+                    <th onclick="sortTable('customer_name')">Customer Name</th>
+                    <th onclick="sortTable('friendly_name')">Friendly Name</th>
+                    <th onclick="sortTable('location')">Location</th>
+                    <th>Revoke</th>
+                </tr>
+                {% for device in devices %}
+                <tr>
+                    <td>{{ device.mac_address }}</td>
+                    <td>{{ device.customer_id }}</td>
+                    <td>{{ device.customer_name }}</td>
+                    <td>{{ device.friendly_name }}</td>
+                    <td>{{ device.location }}</td>
+                    <td><input type="checkbox" name="selected_macs" value="{{ device.mac_address }}"></td>
+                </tr>
+                {% endfor %}
+            </table>
+            <button type="submit">Revoke Selected Devices</button>
+        </form>
+        {% else %}
+        <p>No devices to revoke.</p>
+        {% endif %}
+    </div>
 
     <footer>
         Version: {{ version }} | &copy; 2024 VeriNexus
     </footer>
+
+    <!-- Display pop-up messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        <script>
+        {% for category, message in messages %}
+            showMessage("{{ message }}", "{{ category }}");
+        {% endfor %}
+        </script>
+    {% endif %}
+    {% endwith %}
 </body>
 </html>
