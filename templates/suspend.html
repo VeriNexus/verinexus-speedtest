@@ -1,13 +1,13 @@
-<!-- revoke.html -->
-<!-- Version: 1.27.0 -->
+<!-- suspend.html -->
+<!-- Version: 1.24.0 -->
 <!-- Date: 07/11/2024 -->
-<!-- Description: Device revocation interface with professional and security-focused design -->
+<!-- Description: Device suspension interface with professional and security-focused design -->
 
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>VeriNexus Admin Panel - Revoke Devices</title>
+    <title>VeriNexus Admin Panel - Suspend Devices</title>
     <style>
         /* Professional and security-focused styles */
         body {
@@ -91,6 +91,14 @@
         button:hover {
             background-color: #007acc;
         }
+        .suspended {
+            color: #f44336;
+            font-weight: bold;
+        }
+        .active {
+            color: #4caf50;
+            font-weight: bold;
+        }
         /* Pop-up message styles */
         .popup-message {
             position: fixed;
@@ -137,6 +145,14 @@
                 popup.remove();
             }, 5000);
         }
+
+        function updateDevices() {
+            let customerSelect = document.getElementById('customer_id');
+            let customerId = customerSelect.value;
+            let url = new URL(window.location.href);
+            url.searchParams.set('customer_id', customerId);
+            window.location.href = url.toString();
+        }
     </script>
 </head>
 <body>
@@ -152,47 +168,42 @@
     </header>
 
     <div class="container">
-        <h2>Revoke Devices</h2>
+        <h2>Suspend/Unsuspend Devices</h2>
+
+        <label for="customer_id">Select Customer:</label>
+        <select id="customer_id" name="customer_id" onchange="updateDevices();">
+            <option value="">-- Select Customer --</option>
+            {% for id, name in customers.items() %}
+            <option value="{{ id }}" {% if selected_customer_id == id %}selected{% endif %}>{{ name }} (ID: {{ id }})</option>
+            {% endfor %}
+        </select>
 
         {% if devices %}
-        <form method="get" action="{{ url_for('revoke_device_get') }}">
-            <label for="filter_column">Filter By:</label>
-            <select id="filter_column" name="filter_column">
-                <option value="mac_address" {% if filter_column == 'mac_address' %}selected{% endif %}>MAC Address</option>
-                <option value="customer_id" {% if filter_column == 'customer_id' %}selected{% endif %}>Customer ID</option>
-                <option value="customer_name" {% if filter_column == 'customer_name' %}selected{% endif %}>Customer Name</option>
-                <option value="friendly_name" {% if filter_column == 'friendly_name' %}selected{% endif %}>Friendly Name</option>
-                <option value="location" {% if filter_column == 'location' %}selected{% endif %}>Location</option>
-            </select>
-            <input type="text" name="filter_value" value="{{ filter_value }}">
-            <button type="submit">Filter</button>
-        </form>
-
         <form method="post">
+            <input type="hidden" name="customer_id" value="{{ selected_customer_id }}">
             <table>
                 <tr>
                     <th onclick="sortTable('mac_address')">MAC Address</th>
-                    <th onclick="sortTable('customer_id')">Customer ID</th>
-                    <th onclick="sortTable('customer_name')">Customer Name</th>
                     <th onclick="sortTable('friendly_name')">Friendly Name</th>
                     <th onclick="sortTable('location')">Location</th>
-                    <th>Revoke</th>
+                    <th>Status</th>
+                    <th>Select</th>
                 </tr>
                 {% for device in devices %}
                 <tr>
                     <td>{{ device.mac_address }}</td>
-                    <td>{{ device.customer_id }}</td>
-                    <td>{{ device.customer_name }}</td>
                     <td>{{ device.friendly_name }}</td>
                     <td>{{ device.location }}</td>
+                    <td class="{{ 'suspended' if device.suspended else 'active' }}">{{ 'Suspended' if device.suspended else 'Active' }}</td>
                     <td><input type="checkbox" name="selected_macs" value="{{ device.mac_address }}"></td>
                 </tr>
                 {% endfor %}
             </table>
-            <button type="submit">Revoke Selected Devices</button>
+            <button type="submit" name="action" value="suspend">Suspend Selected Devices</button>
+            <button type="submit" name="action" value="unsuspend">Unsuspend Selected Devices</button>
         </form>
-        {% else %}
-        <p>No devices to revoke.</p>
+        {% elif selected_customer_id %}
+        <p>No devices found for the selected customer.</p>
         {% endif %}
     </div>
 

@@ -1,14 +1,13 @@
 # admin_app.py
-# Version: 1.23.0
-# Date: 06/11/2024
+# Version: 1.27.0
+# Date: 07/11/2024
 # Description:
 # Flask application for managing devices in the VeriNexus Speed Test system.
 # Changes:
-# - Assigned a unique ID to each endpoint stored as a tag for deletion purposes.
-# - Modified delete functionality to use the unique ID tag.
-# - Kept all other data stored as fields.
-# - UI updated to a professional and security-focused design.
-# - All routes and code are included without any omissions.
+# - Implemented a new measurement 'suspended_devices' to track suspended devices.
+# - Updated suspension logic to write to and delete from 'suspended_devices'.
+# - Updated templates to include 'Suspend Devices' in the navigation menu.
+# - Ensured consistency in database field and tag handling.
 
 import logging
 from flask import Flask, request, render_template, redirect, url_for, flash, jsonify, session
@@ -35,6 +34,7 @@ ENDPOINTS_MEASUREMENT = 'endpoints'
 SPEEDTEST_DB = 'speedtest_db_clean'
 DEVICES_MEASUREMENT = 'devices'
 SPEEDTEST_MEASUREMENT = 'speedtest'
+SUSPENDED_DEVICES_MEASUREMENT = 'suspended_devices'  # New measurement for suspended devices
 
 client = InfluxDBClient(host=INFLUXDB_SERVER, port=INFLUXDB_PORT)
 
@@ -76,7 +76,7 @@ create_database_if_not_exists(ENDPOINTS_DB)
 
 @app.route('/')
 def home():
-    return render_template('home.html', version='1.22.0')
+    return render_template('home.html', version='1.27.0')
 
 @app.route('/endpoints')
 def index():
@@ -101,7 +101,7 @@ def index():
     # Retrieve any stored form data from session
     form_data = session.pop('form_data', {})
 
-    return render_template('index.html', points=points, version='1.22.0', form_data=form_data)
+    return render_template('index.html', points=points, version='1.27.0', form_data=form_data)
 
 @app.route('/add', methods=['POST'])
 def add_endpoint():
@@ -287,7 +287,7 @@ def claim_device():
     client.switch_database(ENDPOINTS_DB)
 
     # Pass the data to the template
-    return render_template('claim.html', unclaimed_macs=unclaimed_macs, customers=customers, locations=locations, version='1.22.0')
+    return render_template('claim.html', unclaimed_macs=unclaimed_macs, customers=customers, locations=locations, version='1.27.0')
 
 @app.route('/claim', methods=['POST'])
 def claim_device_post():
@@ -413,10 +413,15 @@ def get_locations():
     if not customer_id:
         return jsonify({'locations': []})
     client.switch_database(SPEEDTEST_DB)
-    devices_data_query = f'SELECT DISTINCT("field_location") FROM "{DEVICES_MEASUREMENT}" WHERE "field_customer_id" = {float(customer_id)}'
+    devices_data_query = f'SELECT "field_location" FROM "{DEVICES_MEASUREMENT}" WHERE "field_customer_id" = {float(customer_id)}'
     devices_data_result = client.query(devices_data_query)
     devices_data_points = list(devices_data_result.get_points())
-    locations = [point['distinct'] for point in devices_data_points if point['distinct']]
+    locations_set = set()
+    for point in devices_data_points:
+        location = point.get('field_location')
+        if location:
+            locations_set.add(location)
+    locations = list(locations_set)
 
     # Switch back to ENDPOINTS_DB
     client.switch_database(ENDPOINTS_DB)
@@ -464,7 +469,7 @@ def revoke_device_get():
     # Switch back to ENDPOINTS_DB
     client.switch_database(ENDPOINTS_DB)
 
-    return render_template('revoke.html', devices=devices, version='1.22.0', filter_column=filter_column, filter_value=filter_value, sort_column=sort_column, sort_order=sort_order)
+    return render_template('revoke.html', devices=devices, version='1.27.0', filter_column=filter_column, filter_value=filter_value, sort_column=sort_column, sort_order=sort_order)
 
 @app.route('/revoke', methods=['POST'])
 def revoke_device_post():
@@ -483,6 +488,11 @@ def revoke_device_post():
             client.query(query)
             logger.info(f"Device with MAC {mac} revoked successfully.")
 
+            # Also remove from suspended_devices if present
+            suspend_query = f'DELETE FROM "{SUSPENDED_DEVICES_MEASUREMENT}" WHERE "tag_mac_address" = \'{mac}\''
+            client.query(suspend_query)
+            logger.info(f"Device with MAC {mac} removed from suspended devices if it was suspended.")
+
         flash("Selected devices have been revoked.", "success")
 
         # Switch back to ENDPOINTS_DB
@@ -493,6 +503,123 @@ def revoke_device_post():
         logger.exception("An error occurred while revoking devices.")
         flash(f"Error: {str(e)}", "error")
         return redirect(url_for('revoke_device_get'))
+
+# Updated route for suspending and unsuspending devices
+@app.route('/suspend', methods=['GET'])
+def suspend_device_get():
+    client.switch_database(SPEEDTEST_DB)
+    # Retrieve all customer IDs and names
+    devices_data_query = f'SELECT "field_customer_id", "field_customer_name" FROM "{DEVICES_MEASUREMENT}"'
+    devices_data_result = client.query(devices_data_query)
+    devices_data_points = list(devices_data_result.get_points())
+
+    # Build customers dictionary
+    customers = {}
+    for point in devices_data_points:
+        customer_id = point.get('field_customer_id')
+        customer_name = point.get('field_customer_name')
+        if customer_id is not None and customer_name:
+            customer_id_str = str(int(customer_id))  # Ensure customer_id is treated as integer
+            customers[customer_id_str] = customer_name
+
+    # Remove duplicates
+    customers = dict(sorted(customers.items(), key=lambda item: int(item[0])))
+
+    selected_customer_id = request.args.get('customer_id')
+    devices = []
+    if selected_customer_id:
+        # Retrieve devices for the selected customer
+        devices_query = f'SELECT * FROM "{DEVICES_MEASUREMENT}" WHERE "field_customer_id" = {float(selected_customer_id)} GROUP BY "tag_mac_address" ORDER BY time DESC LIMIT 1'
+        devices_result = client.query(devices_query)
+        devices_points = []
+        for item in devices_result.get_points():
+            devices_points.append(item)
+
+        # Get suspended MAC addresses
+        suspended_query = f'SELECT * FROM "{SUSPENDED_DEVICES_MEASUREMENT}"'
+        suspended_result = client.query(suspended_query)
+        suspended_points = list(suspended_result.get_points())
+        suspended_macs = {point.get('tag_mac_address') for point in suspended_points}
+
+        # Prepare data for template
+        for point in devices_points:
+            mac_address = point.get('field_mac_address')
+            devices.append({
+                'time': point.get('time'),
+                'mac_address': mac_address,
+                'customer_id': int(point.get('field_customer_id')) if point.get('field_customer_id') else '',
+                'customer_name': point.get('field_customer_name'),
+                'friendly_name': point.get('field_friendly_name'),
+                'location': point.get('field_location'),
+                'suspended': mac_address in suspended_macs
+            })
+
+        # Get filter and sort parameters from query string
+        filter_column = request.args.get('filter_column')
+        filter_value = request.args.get('filter_value', '').strip()
+        sort_column = request.args.get('sort_column')
+        sort_order = request.args.get('sort_order', 'asc')
+
+        # Apply filtering
+        if filter_column and filter_value:
+            devices = [device for device in devices if filter_value.lower() in str(device.get(filter_column, '')).lower()]
+
+        # Apply sorting
+        if sort_column and sort_order != 'none':
+            devices = sorted(devices, key=lambda x: x.get(sort_column, ''), reverse=(sort_order == 'desc'))
+
+    if not devices and selected_customer_id:
+        flash("No devices found for the selected customer.", "info")
+
+    # Switch back to ENDPOINTS_DB
+    client.switch_database(ENDPOINTS_DB)
+
+    return render_template('suspend.html', customers=customers, devices=devices, version='1.27.0', selected_customer_id=selected_customer_id)
+
+@app.route('/suspend', methods=['POST'])
+def suspend_device_post():
+    try:
+        client.switch_database(SPEEDTEST_DB)
+        action = request.form.get('action')
+        selected_macs = request.form.getlist('selected_macs')
+        selected_customer_id = request.form.get('customer_id')
+        if not selected_macs:
+            logger.error("No devices selected for suspension/unsuspension.")
+            flash("No devices selected.", "error")
+            return redirect(url_for('suspend_device_get', customer_id=selected_customer_id))
+
+        for mac in selected_macs:
+            if action == 'suspend':
+                # Write the MAC address to suspended_devices measurement
+                json_body = [
+                    {
+                        "measurement": SUSPENDED_DEVICES_MEASUREMENT,
+                        "tags": {
+                            "tag_mac_address": mac
+                        },
+                        "fields": {
+                            "field_mac_address": mac
+                        }
+                    }
+                ]
+                client.write_points(json_body)
+                logger.info(f"Device with MAC {mac} suspended successfully.")
+            elif action == 'unsuspend':
+                # Delete the MAC address from suspended_devices measurement
+                delete_query = f'DELETE FROM "{SUSPENDED_DEVICES_MEASUREMENT}" WHERE "tag_mac_address" = \'{mac}\''
+                client.query(delete_query)
+                logger.info(f"Device with MAC {mac} unsuspended successfully.")
+
+        flash(f"Selected devices have been {'suspended' if action == 'suspend' else 'unsuspended'}.", "success")
+
+        # Switch back to ENDPOINTS_DB
+        client.switch_database(ENDPOINTS_DB)
+
+        return redirect(url_for('suspend_device_get', customer_id=selected_customer_id))
+    except Exception as e:
+        logger.exception("An error occurred while suspending/unsuspending devices.")
+        flash(f"Error: {str(e)}", "error")
+        return redirect(url_for('suspend_device_get'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
