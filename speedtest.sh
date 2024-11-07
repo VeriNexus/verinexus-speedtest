@@ -1,17 +1,18 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 3.5.0
-# Date: 06/11/2024
+# Version: 3.6.0
+# Date: 07/11/2024
 
 # Description:
-# This script performs a speed test, DHCP test, DNS test, and ping test, collecting various network metrics.
+# This script performs a speed test, DHCP test, DNS test, ping test, and traceroute test, collecting various network metrics.
 # It uploads the results to an InfluxDB server for monitoring.
 # Now includes ISP information retrieved from an external API.
 # Adjusted to reflect changes in the endpoints measurement.
 # Fixed inconsistencies in DHCP test results across different operating systems.
+# Integrated traceroute functionality.
 
 # Version number of the script
-SCRIPT_VERSION="3.5.0"
+SCRIPT_VERSION="3.6.0"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -71,7 +72,7 @@ rotate_log_file
 # Function to check and install dependencies
 check_and_install_dependencies() {
     local missing_dependencies=()
-    local dependencies=("awk" "curl" "jq" "dig" "speedtest-cli" "ping" "ip" "tput" "grep" "sed" "hostname" "date" "sleep" "dhclient" "ifconfig")
+    local dependencies=("awk" "curl" "jq" "dig" "speedtest-cli" "ping" "ip" "tput" "grep" "sed" "hostname" "date" "sleep" "dhclient" "ifconfig" "mtr")
 
     for dep in "${dependencies[@]}"; do
         if ! command -v $dep &> /dev/null; then
@@ -108,6 +109,9 @@ check_and_install_dependencies() {
                     ;;
                 "ifconfig")
                     sudo apt-get install -y net-tools
+                    ;;
+                "mtr")
+                    sudo apt-get install -y mtr
                     ;;
                 *)
                     sudo apt-get install -y "$dep"
@@ -766,6 +770,119 @@ perform_ping_test() {
     perform_ping_test_logic
 }
 perform_ping_test
+
+# Step 12: Performing Traceroute Test
+echo -e "${CYAN}${BOLD}Step 12: Performing Traceroute Test...${NC}"
+perform_traceroute_test() {
+    local MEASUREMENT="trace"
+    local TRACE_ENDPOINTS
+
+    print_debug() {
+        echo -e "${YELLOW}DEBUG: $1${NC}"
+    }
+
+    print_progress() {
+        echo -e "${GREEN}>>> $1${NC}"
+    }
+
+    read_trace_endpoints_from_influx() {
+        print_progress "Reading traceroute endpoints from InfluxDB..."
+
+        # Query InfluxDB for endpoints with traceroute enabled
+        local trace_query='SELECT "field_endpoint" FROM "endpoints" WHERE "field_check_traceroute" = true'
+        print_debug "Traceroute Query: $trace_query"
+
+        local trace_query_result=$(curl -sG "$INFLUXDB_SERVER/query" \
+            --data-urlencode "db=$INFLUXDB_DB" \
+            --data-urlencode "q=$trace_query")
+        print_debug "Traceroute Query Result: $trace_query_result"
+
+        if echo "$trace_query_result" | jq -e '.results[0].series' >/dev/null 2>&1; then
+            TRACE_ENDPOINTS=$(echo "$trace_query_result" | jq -r '.results[0].series[].values[][1]')
+        else
+            echo -e "${RED}Error: No valid endpoints found for traceroute testing.${NC}"
+            log_message "ERROR" "No valid endpoints found for traceroute testing."
+            return 1
+        fi
+
+        print_debug "Traceroute Endpoints: $TRACE_ENDPOINTS"
+    }
+
+    perform_traceroute() {
+        for ENDPOINT in $TRACE_ENDPOINTS; do
+            print_progress "Running MTR for endpoint: $ENDPOINT"
+            MTR_OUTPUT=$(mtr -r -c 1 --json "$ENDPOINT")
+            if [ $? -ne 0 ]; then
+                echo -e "${RED}Error: MTR failed for endpoint: $ENDPOINT${NC}"
+                log_message "ERROR" "MTR failed for endpoint: $ENDPOINT"
+                continue
+            fi
+
+            # Parse MTR output and prepare data for InfluxDB
+            HOPS=$(echo "$MTR_OUTPUT" | jq -c '.report.hubs[]')
+            REPORT_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            TEST_TIME=$(date -u +"%Y-%m-%dT%H:%M:00Z")  # Round down to the nearest minute
+
+            for HOP in $HOPS; do
+                HOP_NO=$(echo "$HOP" | jq -r '.count')
+                HOP_NO=$(printf "%02d" "$HOP_NO")  # Format hop_no with leading zero if necessary
+                HOP_IP=$(echo "$HOP" | jq -r '.host')
+                HOP_LOSS=$(echo "$HOP" | jq -r '.["Loss%"] // 0')
+                HOP_SNT=$(echo "$HOP" | jq -r '.Snt // 0')
+                HOP_LAST=$(echo "$HOP" | jq -r '.Last // 0')
+                HOP_AVG=$(echo "$HOP" | jq -r '.Avg // 0')
+                HOP_BEST=$(echo "$HOP" | jq -r '.Best // 0')
+                HOP_WRST=$(echo "$HOP" | jq -r '.Wrst // 0')
+                HOP_STDEV=$(echo "$HOP" | jq -r '.StDev // 0')
+
+                # Ensure all fields have valid values
+                if [ -z "$HOP_IP" ] || [ -z "$HOP_NO" ]; then
+                    echo -e "${YELLOW}Warning: Skipping hop due to missing IP or hop number.${NC}"
+                    log_message "WARN" "Skipping hop due to missing IP or hop number."
+                    continue
+                fi
+
+                # Escape tag values
+                local ESCAPED_ENDPOINT=$(escape_tag_value "$ENDPOINT")
+                local ESCAPED_HOP=$(escape_tag_value "$HOP_NO-$HOP_IP")
+
+                # Prepare InfluxDB data
+                local TRACE_INFLUX_DATA="$MEASUREMENT,destination=$ESCAPED_ENDPOINT,hop=$ESCAPED_HOP"
+
+                # Prepare fields
+                local FIELDS=""
+                FIELDS+="time=\"$REPORT_TIME\",loss=$HOP_LOSS,snt=$HOP_SNT,last=$HOP_LAST,avg=$HOP_AVG,best=$HOP_BEST,wrst=$HOP_WRST,stdev=$HOP_STDEV,mac_address=\"$MAC_ADDRESS\",public_ip=\"$PUBLIC_IP\",testtime=\"$TEST_TIME\""
+
+                # Append fields to data
+                TRACE_INFLUX_DATA+=" $FIELDS"
+
+                # Append timestamp
+                CURRENT_TIME=$(date +%s%N)
+                TRACE_INFLUX_DATA+=" $CURRENT_TIME"
+
+                # Write to InfluxDB
+                curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$TRACE_INFLUX_DATA"
+
+                if [ $? -eq 0 ]; then
+                    print_progress "MTR data for hop $HOP_NO (IP: $HOP_IP) written to InfluxDB."
+                    log_message "INFO" "MTR data for hop $HOP_NO (IP: $HOP_IP) written to InfluxDB."
+                else
+                    echo -e "${RED}Error: Failed to write MTR data to InfluxDB.${NC}"
+                    log_message "ERROR" "Failed to write MTR data to InfluxDB."
+                fi
+            done
+        done
+    }
+
+    # Main Execution of Traceroute Test
+    read_trace_endpoints_from_influx
+    if [ $? -ne 0 ]; then
+        echo -e "${YELLOW}Skipping Traceroute test due to previous errors.${NC}"
+        return 1
+    fi
+    perform_traceroute
+}
+perform_traceroute_test
 
 # Footer
 echo -e "${MAGENTA}====================================================${NC}"
