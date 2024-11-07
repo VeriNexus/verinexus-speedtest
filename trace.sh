@@ -1,13 +1,13 @@
 #!/bin/bash
 # File: traceroute.sh
-# Version: 1.1.6
+# Version: 1.1.7
 # Date: 07/11/2024
 
 # Description:
 # Script to run MTR for endpoints and store results in InfluxDB in a format suitable for Node Graph visualization, including the MAC address of the active NIC.
 
 # Version number of the script
-SCRIPT_VERSION="1.1.5"
+SCRIPT_VERSION="1.1.6"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -122,8 +122,11 @@ for endpoint in $endpoints; do
             continue
         fi
 
-        # Prepare InfluxDB line protocol data, including hop_id and hop_ip fields
-        data="trace,destination=$endpoint hop_id=$hop_no,hop_ip=\"$hop_ip\",loss=$hop_loss,snt=$hop_snt,last=$hop_last,avg=$hop_avg,best=$hop_best,wrst=$hop_wrst,stdev=$hop_stdev,mac_address=\"$ACTIVE_MAC_ADDRESS\""
+        # Prepare the hop field as "hop_no-hop_ip"
+        hop_field="$hop_no-$hop_ip"
+
+        # Prepare InfluxDB line protocol data, including hop_id, hop_ip, and hop fields
+        data="trace,destination=$endpoint hop_id=$hop_no,hop_ip=\"$hop_ip\",hop=\"$hop_field\",loss=$hop_loss,snt=$hop_snt,last=$hop_last,avg=$hop_avg,best=$hop_best,wrst=$hop_wrst,stdev=$hop_stdev,mac_address=\"$ACTIVE_MAC_ADDRESS\""
         write_to_influxdb "$data"
         log_message "${GREEN}[INFO]" "MTR data for hop $hop_no (IP: $hop_ip) written to InfluxDB with MAC address $ACTIVE_MAC_ADDRESS."
     done
