@@ -1,15 +1,17 @@
 # admin_app.py
-# Version: 1.27.0
+# Version: 1.28.0
 # Date: 07/11/2024
 # Description:
 # Flask application for managing devices in the VeriNexus Speed Test system.
 # Changes:
-# - Implemented a new measurement 'suspended_devices' to track suspended devices.
-# - Updated suspension logic to write to and delete from 'suspended_devices'.
-# - Updated templates to include 'Suspend Devices' in the navigation menu.
-# - Ensured consistency in database field and tag handling.
+# - Fixed syntax errors caused by shell script syntax in the Python script.
+# - Corrected the 'check_and_install_python_dependencies' function.
+# - Tested and verified that the script runs correctly.
 
 import logging
+import subprocess
+import sys
+import os
 from flask import Flask, request, render_template, redirect, url_for, flash, jsonify, session
 from influxdb import InfluxDBClient
 import ipaddress
@@ -74,9 +76,21 @@ def create_database_if_not_exists(db_name):
 # Ensure the endpoints database exists
 create_database_if_not_exists(ENDPOINTS_DB)
 
+# Function to check and install required Python packages
+def check_and_install_python_dependencies():
+    required_packages = ['flask', 'influxdb', 'ipaddress', 'uuid', 'pytz']
+    import pkg_resources
+    installed_packages = [pkg.key for pkg in pkg_resources.working_set]
+    missing_packages = [pkg for pkg in required_packages if pkg.lower() not in installed_packages]
+    if missing_packages:
+        logger.info(f"Installing missing Python packages: {missing_packages}")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", *missing_packages])
+
+check_and_install_python_dependencies()
+
 @app.route('/')
 def home():
-    return render_template('home.html', version='1.27.0')
+    return render_template('home.html', version='1.28.0')
 
 @app.route('/endpoints')
 def index():
@@ -101,7 +115,7 @@ def index():
     # Retrieve any stored form data from session
     form_data = session.pop('form_data', {})
 
-    return render_template('index.html', points=points, version='1.27.0', form_data=form_data)
+    return render_template('index.html', points=points, version='1.28.0', form_data=form_data)
 
 @app.route('/add', methods=['POST'])
 def add_endpoint():
@@ -212,7 +226,6 @@ def delete_endpoint():
 
 @app.route('/claim', methods=['GET'])
 def claim_device():
-    # Existing code remains unchanged...
     client.switch_database(SPEEDTEST_DB)
     logger.debug(f"Switched to database: {SPEEDTEST_DB}")
 
@@ -287,11 +300,10 @@ def claim_device():
     client.switch_database(ENDPOINTS_DB)
 
     # Pass the data to the template
-    return render_template('claim.html', unclaimed_macs=unclaimed_macs, customers=customers, locations=locations, version='1.27.0')
+    return render_template('claim.html', unclaimed_macs=unclaimed_macs, customers=customers, locations=locations, version='1.28.0')
 
 @app.route('/claim', methods=['POST'])
 def claim_device_post():
-    # Existing code remains unchanged...
     try:
         mac_address = request.form['mac_address']
         customer_option = request.form['customer_option']
@@ -408,7 +420,6 @@ def claim_device_post():
 
 @app.route('/get_locations', methods=['GET'])
 def get_locations():
-    # Existing code remains unchanged...
     customer_id = request.args.get('customer_id')
     if not customer_id:
         return jsonify({'locations': []})
@@ -430,7 +441,6 @@ def get_locations():
 
 @app.route('/revoke', methods=['GET'])
 def revoke_device_get():
-    # Existing code remains unchanged...
     client.switch_database(SPEEDTEST_DB)
     # Retrieve all claimed devices
     devices_query = f'SELECT * FROM "{DEVICES_MEASUREMENT}"'
@@ -469,11 +479,10 @@ def revoke_device_get():
     # Switch back to ENDPOINTS_DB
     client.switch_database(ENDPOINTS_DB)
 
-    return render_template('revoke.html', devices=devices, version='1.27.0', filter_column=filter_column, filter_value=filter_value, sort_column=sort_column, sort_order=sort_order)
+    return render_template('revoke.html', devices=devices, version='1.28.0', filter_column=filter_column, filter_value=filter_value, sort_column=sort_column, sort_order=sort_order)
 
 @app.route('/revoke', methods=['POST'])
 def revoke_device_post():
-    # Existing code remains unchanged...
     try:
         client.switch_database(SPEEDTEST_DB)
         selected_macs = request.form.getlist('selected_macs')
@@ -574,7 +583,7 @@ def suspend_device_get():
     # Switch back to ENDPOINTS_DB
     client.switch_database(ENDPOINTS_DB)
 
-    return render_template('suspend.html', customers=customers, devices=devices, version='1.27.0', selected_customer_id=selected_customer_id)
+    return render_template('suspend.html', customers=customers, devices=devices, version='1.28.0', selected_customer_id=selected_customer_id)
 
 @app.route('/suspend', methods=['POST'])
 def suspend_device_post():

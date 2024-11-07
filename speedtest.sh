@@ -1,18 +1,14 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 3.6.0
+# Version: 3.7.0
 # Date: 07/11/2024
 
 # Description:
-# This script performs a speed test, DHCP test, DNS test, ping test, and traceroute test, collecting various network metrics.
-# It uploads the results to an InfluxDB server for monitoring.
-# Now includes ISP information retrieved from an external API.
-# Adjusted to reflect changes in the endpoints measurement.
-# Fixed inconsistencies in DHCP test results across different operating systems.
-# Integrated traceroute functionality.
+# This script performs various network tests and uploads the results to InfluxDB.
+# Now includes a suspension check to prevent tests from running on suspended devices.
 
 # Version number of the script
-SCRIPT_VERSION="3.6.0"
+SCRIPT_VERSION="3.7.0"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -25,6 +21,7 @@ MAX_LOG_SIZE=5242880  # 5MB
 INFLUXDB_SERVER="http://82.165.7.116:8086"
 INFLUXDB_DB="speedtest_db_clean"
 INFLUXDB_MEASUREMENT="speedtest"
+SUSPENDED_DEVICES_MEASUREMENT="suspended_devices"
 
 # ANSI Color Codes
 RED='\033[0;31m'
@@ -125,7 +122,46 @@ check_and_install_dependencies() {
 # Call the check_and_install_dependencies function early in the script
 check_and_install_dependencies
 
-# Function to ensure the wrapper script exists
+# Function to get active interface and MAC address
+get_active_interface_and_mac() {
+    echo -ne "${CYAN}Fetching MAC Address and LAN IP... "
+    ACTIVE_IFACE=$(ip route | grep '^default' | awk '{print $5}' | head -n1)
+    if [ -n "$ACTIVE_IFACE" ]; then
+        if [ -f "/sys/class/net/$ACTIVE_IFACE/address" ]; then
+            MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
+        else
+            MAC_ADDRESS=$(ifconfig $ACTIVE_IFACE | grep -oP '(?<=ether\s)[\da-fA-F:]{17}' | head -n1)
+            if [ -z "$MAC_ADDRESS" ]; then
+                MAC_ADDRESS="N/A"
+                log_message "ERROR" "MAC address not found for interface $ACTIVE_IFACE."
+            fi
+        fi
+        LAN_IP=$(ip addr show $ACTIVE_IFACE | grep "inet " | awk '{print $2}' | cut -d/ -f1)
+    else
+        log_message "ERROR" "Could not determine active network interface."
+        MAC_ADDRESS="N/A"
+        LAN_IP="N/A"
+    fi
+    echo -e "${CHECKMARK}${GREEN}MAC Address: $MAC_ADDRESS, LAN IP: $LAN_IP${NC}"
+}
+
+# Function to check if the device is suspended
+check_suspension_status() {
+    echo -ne "${CYAN}Checking if device is suspended... "
+    local query="SELECT * FROM \"$SUSPENDED_DEVICES_MEASUREMENT\" WHERE \"tag_mac_address\" = '$MAC_ADDRESS' LIMIT 1"
+    local result=$(curl -sG "$INFLUXDB_SERVER/query" \
+        --data-urlencode "db=$INFLUXDB_DB" \
+        --data-urlencode "q=$query")
+    if echo "$result" | jq -e '.results[0].series[0]' >/dev/null 2>&1; then
+        echo -e "${CROSS}${RED}Device is suspended. Exiting.${NC}"
+        log_message "INFO" "Device with MAC address $MAC_ADDRESS is suspended. Exiting script."
+        exit 0
+    else
+        echo -e "${CHECKMARK}${GREEN}Device is active. Proceeding.${NC}"
+    fi
+}
+
+# Ensure the wrapper script exists
 ensure_wrapper_script() {
     local WRAPPER_SCRIPT="$BASE_DIR/speedtest_wrapper.sh"
     local WRAPPER_URL="https://raw.githubusercontent.com/VeriNexus/verinexus-speedtest/main/speedtest_wrapper.sh"
@@ -247,6 +283,18 @@ escape_tag_value() {
     echo "$1" | sed 's/ /\\ /g; s/,/\\,/g; s/=/\\=/g'
 }
 
+# Rotate log file at the start
+rotate_log_file
+
+# Check and install dependencies
+check_and_install_dependencies
+
+# Get active interface and MAC address
+get_active_interface_and_mac
+
+# Check suspension status
+check_suspension_status
+
 # Ensure the wrapper script exists before updating crontab
 ensure_wrapper_script
 
@@ -297,29 +345,8 @@ PRIVATE_IP=$(hostname -I | awk '{print $1}')
 PUBLIC_IP=$(curl -s ifconfig.co)
 echo -e "${CHECKMARK}${GREEN}Private IP: $PRIVATE_IP, Public IP: $PUBLIC_IP${NC}"
 
-# Step 4: Fetching MAC Address and LAN IP
-echo -ne "${CYAN}Step 4: Fetching MAC Address and LAN IP... "
-ACTIVE_IFACE=$(ip route | grep '^default' | awk '{print $5}' | head -n1)
-if [ -n "$ACTIVE_IFACE" ]; then
-    if [ -f "/sys/class/net/$ACTIVE_IFACE/address" ]; then
-        MAC_ADDRESS=$(cat /sys/class/net/$ACTIVE_IFACE/address)
-    else
-        MAC_ADDRESS=$(ifconfig $ACTIVE_IFACE | grep -oP '(?<=ether\s)[\da-fA-F:]{17}' | head -n1)
-        if [ -z "$MAC_ADDRESS" ]; then
-            MAC_ADDRESS="N/A"
-            log_message "ERROR" "MAC address not found for interface $ACTIVE_IFACE."
-        fi
-    fi
-    LAN_IP=$(ip addr show $ACTIVE_IFACE | grep "inet " | awk '{print $2}' | cut -d/ -f1)
-else
-    log_message "ERROR" "Could not determine active network interface."
-    MAC_ADDRESS="N/A"
-    LAN_IP="N/A"
-fi
-echo -e "${CHECKMARK}${GREEN}MAC Address: $MAC_ADDRESS, LAN IP: $LAN_IP${NC}"
-
-# Step 5: Extracting Speed Test Results
-echo -ne "${CYAN}Step 5: Extracting Speed Test Results... "
+# Step 4: Extracting Speed Test Results
+echo -ne "${CYAN}Step 4: Extracting Speed Test Results... "
 SERVER_ID=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $1}')
 SERVER_NAME=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $2}' | sed 's/\"//g') # Remove quotes
 LOCATION=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $3}' | sed 's/\"//g')    # Remove quotes
@@ -337,8 +364,8 @@ if [[ -z "$DOWNLOAD_SPEED" || -z "$UPLOAD_SPEED" || -z "$LATENCY" || -z "$PUBLIC
 fi
 echo -e "${CHECKMARK}${GREEN}Download: $DOWNLOAD_SPEED Mbps, Upload: $UPLOAD_SPEED Mbps, Latency: $LATENCY ms${NC}"
 
-# Step 6: Fetching ISP Information
-echo -ne "${CYAN}Step 6: Fetching ISP Information... "
+# Step 5: Fetching ISP Information
+echo -ne "${CYAN}Step 5: Fetching ISP Information... "
 ISP=$(curl -s http://ip-api.com/json/ | jq -r '.isp')
 if [ -n "$ISP" ] && [ "$ISP" != "null" ]; then
     echo -e "${CHECKMARK}${GREEN}ISP: $ISP${NC}"
@@ -348,8 +375,8 @@ else
     log_message "WARN" "Failed to retrieve ISP information from ip-api.com."
 fi
 
-# Step 7: Extracting Shareable ID
-echo -ne "${CYAN}Step 7: Extracting Shareable ID... "
+# Step 6: Extracting Shareable ID
+echo -ne "${CYAN}Step 6: Extracting Shareable ID... "
 SHARE_URL=$(echo "$SPEEDTEST_OUTPUT" | awk -F, '{print $9}')
 SHARE_ID=$(echo "$SHARE_URL" | awk -F'/' '{print $NF}' | sed 's/.png//')
 echo -e "${CHECKMARK}${GREEN}Shareable ID: $SHARE_ID${NC}"
@@ -413,8 +440,8 @@ CURRENT_TIME=$(date +%s%N)
 # Append timestamp to InfluxDB data
 INFLUXDB_DATA+=" $CURRENT_TIME"
 
-# Step 8: Saving Speed Test Results to InfluxDB
-echo -ne "${CYAN}Step 8: Saving Speed Test Results to InfluxDB... "
+# Step 7: Saving Speed Test Results to InfluxDB
+echo -ne "${CYAN}Step 7: Saving Speed Test Results to InfluxDB... "
 curl -s -o /dev/null -XPOST "$INFLUXDB_SERVER/write?db=$INFLUXDB_DB" --data-binary "$INFLUXDB_DATA"
 if [ $? -eq 0 ]; then
     echo -e "${CHECKMARK}${GREEN}Data successfully saved to InfluxDB.${NC}"
@@ -424,8 +451,8 @@ else
     log_message "ERROR" "Failed to save speed test data to InfluxDB."
 fi
 
-# Step 9: Performing DHCP Test
-echo -e "${CYAN}${BOLD}Step 9: Performing DHCP Test...${NC}"
+# Step 8: Performing DHCP Test
+echo -e "${CYAN}${BOLD}Step 8: Performing DHCP Test...${NC}"
 perform_dhcp_test() {
     local START_TIME
     local END_TIME
@@ -520,8 +547,8 @@ perform_dhcp_test() {
 }
 perform_dhcp_test
 
-# Step 10: Performing DNS Test
-echo -e "${CYAN}${BOLD}Step 10: Performing DNS Test...${NC}"
+# Step 9: Performing DNS Test
+echo -e "${CYAN}${BOLD}Step 9: Performing DNS Test...${NC}"
 perform_dns_test() {
     local TEST_ID="run-$(date +%Y%m%d%H%M%S)"
     local MEASUREMENT="dns"
@@ -669,8 +696,8 @@ perform_dns_test() {
 }
 perform_dns_test || echo -e "${YELLOW}DNS test encountered errors but continuing to Ping Test.${NC}"
 
-# Step 11: Performing Ping Test
-echo -e "${CYAN}${BOLD}Step 11: Performing Ping Test...${NC}"
+# Step 10: Performing Ping Test
+echo -e "${CYAN}${BOLD}Step 10: Performing Ping Test...${NC}"
 perform_ping_test() {
     local MEASUREMENT="ping"
     local PING_ENDPOINTS
@@ -771,8 +798,8 @@ perform_ping_test() {
 }
 perform_ping_test
 
-# Step 12: Performing Traceroute Test
-echo -e "${CYAN}${BOLD}Step 12: Performing Traceroute Test...${NC}"
+# Step 11: Performing Traceroute Test
+echo -e "${CYAN}${BOLD}Step 11: Performing Traceroute Test...${NC}"
 perform_traceroute_test() {
     local MEASUREMENT="trace"
     local TRACE_ENDPOINTS
@@ -845,13 +872,15 @@ perform_traceroute_test() {
                 # Escape tag values
                 local ESCAPED_ENDPOINT=$(escape_tag_value "$ENDPOINT")
                 local ESCAPED_HOP=$(escape_tag_value "$HOP_NO-$HOP_IP")
+                local ESCAPED_MAC_ADDRESS=$(escape_tag_value "$MAC_ADDRESS")
+                local ESCAPED_PUBLIC_IP=$(escape_tag_value "$PUBLIC_IP")
 
                 # Prepare InfluxDB data
-                local TRACE_INFLUX_DATA="$MEASUREMENT,destination=$ESCAPED_ENDPOINT,hop=$ESCAPED_HOP"
+                local TRACE_INFLUX_DATA="$MEASUREMENT,tag_destination=$ESCAPED_ENDPOINT,tag_hop=$ESCAPED_HOP,tag_mac_address=$ESCAPED_MAC_ADDRESS,tag_public_ip=$ESCAPED_PUBLIC_IP"
 
                 # Prepare fields
                 local FIELDS=""
-                FIELDS+="time=\"$REPORT_TIME\",loss=$HOP_LOSS,snt=$HOP_SNT,last=$HOP_LAST,avg=$HOP_AVG,best=$HOP_BEST,wrst=$HOP_WRST,stdev=$HOP_STDEV,mac_address=\"$MAC_ADDRESS\",public_ip=\"$PUBLIC_IP\",testtime=\"$TEST_TIME\""
+                FIELDS+="field_time=\"$REPORT_TIME\",field_loss=$HOP_LOSS,field_snt=$HOP_SNT,field_last=$HOP_LAST,field_avg=$HOP_AVG,field_best=$HOP_BEST,field_wrst=$HOP_WRST,field_stdev=$HOP_STDEV,field_testtime=\"$TEST_TIME\""
 
                 # Append fields to data
                 TRACE_INFLUX_DATA+=" $FIELDS"
