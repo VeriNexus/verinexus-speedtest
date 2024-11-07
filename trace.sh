@@ -1,7 +1,7 @@
 #!/bin/bash
 # File: traceroute.sh
-# Version: 1.1.5
-# Date: 06/11/2024
+# Version: 1.1.6
+# Date: 07/11/2024
 
 # Description:
 # Script to run MTR for endpoints and store results in InfluxDB in a format suitable for Node Graph visualization, including the MAC address of the active NIC.
@@ -104,7 +104,7 @@ for endpoint in $endpoints; do
 
     for hop in $hops; do
         hop_no=$(echo "$hop" | jq -r '.count')
-        hop_ip=$(echo "$hop" | jq -r '.host')
+        hop_ip_full=$(echo "$hop" | jq -r '.host')
         hop_loss=$(echo "$hop" | jq -r '.["Loss%"] // 0')
         hop_snt=$(echo "$hop" | jq -r '.Snt // 0')
         hop_last=$(echo "$hop" | jq -r '.Last // 0')
@@ -113,14 +113,17 @@ for endpoint in $endpoints; do
         hop_wrst=$(echo "$hop" | jq -r '.Wrst // 0')
         hop_stdev=$(echo "$hop" | jq -r '.StDev // 0')
 
+        # Extract only the IP address part (remove DNS-resolved name, if any)
+        hop_ip=$(echo "$hop_ip_full" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' || echo "$hop_ip_full")
+
         # Ensure all fields have valid values
         if [ -z "$hop_ip" ] || [ -z "$hop_no" ]; then
             log_message "${YELLOW}[WARNING]" "Skipping hop due to missing IP or hop number."
             continue
         fi
 
-        # Format data for InfluxDB, including the MAC address of the active NIC
-        data="trace,destination=$endpoint,hop=$hop_no-$hop_ip time=\"$report_time\",loss=$hop_loss,snt=$hop_snt,last=$hop_last,avg=$hop_avg,best=$hop_best,wrst=$hop_wrst,stdev=$hop_stdev,mac_address=\"$ACTIVE_MAC_ADDRESS\""
+        # Prepare InfluxDB line protocol data, including hop_id and hop_ip fields
+        data="trace,destination=$endpoint hop_id=$hop_no,hop_ip=\"$hop_ip\",loss=$hop_loss,snt=$hop_snt,last=$hop_last,avg=$hop_avg,best=$hop_best,wrst=$hop_wrst,stdev=$hop_stdev,mac_address=\"$ACTIVE_MAC_ADDRESS\""
         write_to_influxdb "$data"
         log_message "${GREEN}[INFO]" "MTR data for hop $hop_no (IP: $hop_ip) written to InfluxDB with MAC address $ACTIVE_MAC_ADDRESS."
     done
