@@ -1,13 +1,13 @@
 #!/bin/bash
 # File: traceroute.sh
-# Version: 1.1.7
-# Date: 07/11/2024
+# Version: 1.2
+# Date: 06/11/2024
 
 # Description:
 # Script to run MTR for endpoints and store results in InfluxDB in a format suitable for Node Graph visualization, including the MAC address of the active NIC.
 
 # Version number of the script
-SCRIPT_VERSION="1.1.6"
+SCRIPT_VERSION="1.1.7"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -101,10 +101,12 @@ for endpoint in $endpoints; do
     # Parse MTR output and prepare data for InfluxDB
     hops=$(echo "$mtr_output" | jq -c '.report.hubs[]')
     report_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    test_time=$(date -u +"%Y-%m-%dT%H:%M:00Z")  # Round down to the nearest minute
 
     for hop in $hops; do
         hop_no=$(echo "$hop" | jq -r '.count')
-        hop_ip_full=$(echo "$hop" | jq -r '.host')
+        hop_no=$(printf "%02d" "$hop_no")  # Format hop_no with leading zero if necessary
+        hop_ip=$(echo "$hop" | jq -r '.host')
         hop_loss=$(echo "$hop" | jq -r '.["Loss%"] // 0')
         hop_snt=$(echo "$hop" | jq -r '.Snt // 0')
         hop_last=$(echo "$hop" | jq -r '.Last // 0')
@@ -113,22 +115,16 @@ for endpoint in $endpoints; do
         hop_wrst=$(echo "$hop" | jq -r '.Wrst // 0')
         hop_stdev=$(echo "$hop" | jq -r '.StDev // 0')
 
-        # Extract only the IP address part (remove DNS-resolved name, if any)
-        hop_ip=$(echo "$hop_ip_full" | grep -Eo '([0-9]{1,3}\.){3}[0-9]{1,3}' || echo "$hop_ip_full")
-
         # Ensure all fields have valid values
         if [ -z "$hop_ip" ] || [ -z "$hop_no" ]; then
             log_message "${YELLOW}[WARNING]" "Skipping hop due to missing IP or hop number."
             continue
         fi
 
-        # Prepare the hop field as "hop_no-hop_ip"
-        hop_field="$hop_no-$hop_ip"
-
-        # Prepare InfluxDB line protocol data, including hop_id, hop_ip, and hop fields
-        data="trace,destination=$endpoint hop_id=$hop_no,hop_ip=\"$hop_ip\",hop=\"$hop_field\",loss=$hop_loss,snt=$hop_snt,last=$hop_last,avg=$hop_avg,best=$hop_best,wrst=$hop_wrst,stdev=$hop_stdev,mac_address=\"$ACTIVE_MAC_ADDRESS\""
+        # Format data for InfluxDB, including the MAC address of the active NIC and test time
+        data="trace,destination=$endpoint,hop=$hop_no-$hop_ip time=\"$report_time\",loss=$hop_loss,snt=$hop_snt,last=$hop_last,avg=$hop_avg,best=$hop_best,wrst=$hop_wrst,stdev=$hop_stdev,mac_address=\"$ACTIVE_MAC_ADDRESS\",testtime=\"$test_time\""
         write_to_influxdb "$data"
-        log_message "${GREEN}[INFO]" "MTR data for hop $hop_no (IP: $hop_ip) written to InfluxDB with MAC address $ACTIVE_MAC_ADDRESS."
+        log_message "${GREEN}[INFO]" "MTR data for hop $hop_no (IP: $hop_ip) written to InfluxDB with MAC address $ACTIVE_MAC_ADDRESS and test time $test_time."
     done
 done
 
