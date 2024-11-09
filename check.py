@@ -1,6 +1,6 @@
 """
 File Name: check.py
-Version: 1.3
+Version: 1.4
 Date: November 10, 2024
 Description:
     This Python script runs on the server to check that remote nodes are posting keepalive updates.
@@ -8,16 +8,14 @@ Description:
     It writes status changes to the database only when the status changes, minimizing database writes.
     It now includes a curses-based UI to avoid excessive scrolling, provides real-time status updates,
     displays settings from the 'settings' measurement, and uses these settings within the script.
+    Updated to fix settings retrieval issues and enhance error handling.
 
 Changelog:
-    Version 1.0 - Initial release.
-    Version 1.1 - Implemented keepalive mechanism, handled suspended devices, optimized database writes.
-    Version 1.2 - Added curses-based UI to enhance display and avoid excessive scrolling.
-    Version 1.3 - Displayed settings in UI, utilized settings from 'settings' measurement, implemented HEARTBEAT setting, and improved overall script reliability.
+    Version 1.4 - Fixed settings retrieval, enhanced error handling, ensured script functionality.
 """
 
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from influxdb import InfluxDBClient
 import curses
 import signal
@@ -37,16 +35,19 @@ settings_info = {}
 # Function to read settings from InfluxDB in key-value format
 def get_settings():
     try:
-        query = "SELECT LAST(*) FROM settings"
+        query = "SELECT * FROM settings ORDER BY time DESC LIMIT 1"
         result = influx_client.query(query)
         settings = {}
         if result:
             for point in result.get_points():
-                for key in point:
-                    if key.startswith('field_'):
-                        setting_name = key.replace('field_', '')
-                        settings[setting_name] = point[key]
-        return settings
+                settings_name = point.get('SETTING_NAME')
+                setting_value = point.get('SETTING')
+                if settings_name and setting_value is not None:
+                    settings[settings_name.strip('"')] = setting_value.strip('"') if isinstance(setting_value, str) else setting_value
+            return settings
+        else:
+            print("Settings query returned no results.")
+            return None
     except Exception as e:
         print(f"Failed to retrieve settings from InfluxDB: {e}")
         return None
@@ -94,7 +95,7 @@ def check_node_status(stdscr):
                     clean_exit(None, None)
 
                 # Get list of all MAC addresses from device_status measurement
-                device_status_query = "SELECT LAST(field_status) FROM device_status GROUP BY tag_mac_address"
+                device_status_query = "SELECT LAST(field_status), LAST(tag_external_ip) FROM device_status GROUP BY tag_mac_address"
                 device_status_result = influx_client.query(device_status_query)
 
                 if not device_status_result:
@@ -140,7 +141,7 @@ def check_node_status(stdscr):
                     if is_suspended:
                         new_status = 'maintenance'
                     elif time_diff > heartbeat:
-                        new_status = last_status  # Use last known status
+                        new_status = 'down'
                     else:
                         new_status = last_status
 

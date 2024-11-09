@@ -1,30 +1,17 @@
 """
 File Name: test.py
-Version: 2.7
+Version: 2.8
 Date: November 10, 2024
 Description:
     This Python script monitors network connectivity to the internet, performs device status checks,
     writes aggregated data to InfluxDB, synchronizes time using NTP, and sends email alerts when necessary.
     It uses `curses` for a dynamic display and allows simulating network disconnection and reconnection with key presses.
     It implements efficient data storage and a clean exit mechanism.
-    It has been updated to display settings from the InfluxDB 'settings' measurement, utilize these settings in the script,
-    fix the availability calculations, and enhance the UI for better clarity and aesthetics.
+    It has been updated to fix the settings retrieval issue, correct the availability calculations,
+    and enhance the UI for better clarity and aesthetics.
 
 Changelog:
-    Version 1.0 - Initial release with console-based output and simulated monitoring logic.
-    Version 1.1 - Added full functionality: InfluxDB integration, NTP sync, email alerts, and improved error handling.
-    Version 1.2 - Implemented static console display and added logging to verify InfluxDB writes.
-    Version 1.3 - Replaced scrolling output with a static display using `curses`.
-    Version 1.4 - Added local caching and efficient InfluxDB writes.
-    Version 1.5 - Replaced `curses` with simple print statements for debugging.
-    Version 2.0 - Improved efficiency, added network disconnection handling, and enhanced alerting system.
-    Version 2.1 - Integrated `curses` for static display and added key press handling for simulating network disconnection and reconnection.
-    Version 2.2 - Implemented efficient data storage, clean exit mechanism, and used MAC address as device ID.
-    Version 2.3 - Fixed MAC address retrieval, improved data writing efficiency, enhanced script termination, and removed redundant fields.
-    Version 2.4 - Added version display in UI, detailed database write information, and uptime statistics over last hour, day, and month.
-    Version 2.5 - Optimized database writes, implemented keepalive mechanism, handled suspended devices, improved caching, fixed uptime calculations, and enhanced UI.
-    Version 2.6 - Deleted old keepalives upon writing new ones, wrote current status at startup, calculated uptime percentages over specific periods, enhanced UI with status write info, displayed DB status and local IP, and improved overall UI aesthetics.
-    Version 2.7 - Displayed settings in UI, utilized settings from 'settings' measurement, fixed availability calculations, used NTP_SERVER for time sync, used DETECTION_ENDPOINT for connectivity checks, and improved overall script reliability.
+    Version 2.8 - Fixed settings retrieval, corrected availability calculations, ensured script functionality.
 """
 
 import time
@@ -64,7 +51,7 @@ status_info = {
     "last_write_status": "Not yet written",
     "external_ip": None,
     "local_ip": None,
-    "version": "2.7",
+    "version": "2.8",
     "db_write_details": "",
     "uptime_percentage_hour": 0.0,
     "uptime_percentage_day": 0.0,
@@ -124,21 +111,24 @@ except Exception as e:
 # Function to read settings from InfluxDB in key-value format
 def get_settings():
     try:
-        query = "SELECT LAST(*) FROM settings"
+        query = "SELECT * FROM settings ORDER BY time DESC LIMIT 1"
         result = influx_client.query(query)
         settings = {}
         if result:
             for point in result.get_points():
-                for key in point:
-                    if key.startswith('field_'):
-                        setting_name = key.replace('field_', '')
-                        settings[setting_name] = point[key]
-        logging.info("Settings successfully retrieved from InfluxDB.")
-        status_info["settings"] = settings
-        # Create a string representation for UI display
-        settings_display = "\n".join([f"{k}: {v}" for k, v in settings.items()])
-        status_info["settings_display"] = settings_display
-        return settings
+                settings_name = point.get('SETTING_NAME')
+                setting_value = point.get('SETTING')
+                if settings_name and setting_value is not None:
+                    settings[settings_name.strip('"')] = setting_value.strip('"') if isinstance(setting_value, str) else setting_value
+            logging.info("Settings successfully retrieved from InfluxDB.")
+            status_info["settings"] = settings
+            # Create a string representation for UI display
+            settings_display = "\n".join([f"{k}: {v}" for k, v in settings.items()])
+            status_info["settings_display"] = settings_display
+            return settings
+        else:
+            logging.error("Settings query returned no results.")
+            return None
     except Exception as e:
         logging.error(f"Failed to retrieve settings from InfluxDB: {e}")
         return None
@@ -261,32 +251,50 @@ def clean_exit(signum, frame):
 def calculate_uptime_percentages():
     try:
         periods = {
-            "hour": "1h",
-            "day": "24h",
-            "month": "30d"
+            "hour": 3600,
+            "day": 86400,
+            "month": 2592000  # 30 days
         }
-        for period_name, period_duration in periods.items():
+        for period_name, period_seconds in periods.items():
+            now = datetime.utcnow().replace(tzinfo=timezone.utc)
+            period_start = now - timedelta(seconds=period_seconds)
+
+            # Query status changes in the period
             query = f"""
-                SELECT COUNT(field_status) FROM device_status
-                WHERE time > now() - {period_duration} AND tag_mac_address='{DEVICE_MAC}' AND field_status='up'
+                SELECT * FROM device_status
+                WHERE time > '{period_start.isoformat()}Z' AND tag_mac_address='{DEVICE_MAC}'
+                ORDER BY time ASC
             """
-            total_query = f"""
-                SELECT COUNT(field_status) FROM device_status
-                WHERE time > now() - {period_duration} AND tag_mac_address='{DEVICE_MAC}'
-            """
-            up_result = influx_client.query(query)
-            total_result = influx_client.query(total_query)
+            result = influx_client.query(query)
+            points = list(result.get_points())
 
-            up_points = list(up_result.get_points())
-            total_points = list(total_result.get_points())
-
-            up_count = up_points[0]['count'] if up_points else 0
-            total_count = total_points[0]['count'] if total_points else 0
-
-            if total_count > 0:
-                uptime_percentage = (up_count / total_count) * 100
+            if not points:
+                uptime_percentage = 100.0 if status_info["current_status"] == 'up' else 0.0
             else:
-                uptime_percentage = 0.0
+                total_time = 0
+                uptime = 0
+                last_time = period_start
+                last_status = None
+
+                for point in points:
+                    time_point = datetime.strptime(point['time'], '%Y-%m-%dT%H:%M:%S.%fZ').replace(tzinfo=timezone.utc)
+                    duration = (time_point - last_time).total_seconds()
+                    if last_status == 'up':
+                        uptime += duration
+                    total_time += duration
+                    last_time = time_point
+                    last_status = point['field_status']
+
+                # Account for time since last point
+                duration = (now - last_time).total_seconds()
+                if last_status == 'up':
+                    uptime += duration
+                total_time += duration
+
+                if total_time > 0:
+                    uptime_percentage = (uptime / total_time) * 100
+                else:
+                    uptime_percentage = 0.0
 
             status_info[f'uptime_percentage_{period_name}'] = uptime_percentage
     except Exception as e:
@@ -314,6 +322,9 @@ def monitor_device(stdscr):
     settings = get_settings()
     if not settings:
         logging.critical("No settings available. Exiting monitoring loop.")
+        stdscr.addstr(0, 0, "No settings available. Exiting...")
+        stdscr.refresh()
+        time.sleep(2)
         return
 
     # Update settings in status_info
@@ -464,6 +475,9 @@ def monitor_device(stdscr):
             time.sleep(status_interval)
         except Exception as e:
             logging.error(f"Error in monitoring loop: {e}")
+            stdscr.addstr(24, 0, f"Error: {e}")
+            stdscr.refresh()
+            time.sleep(1)
 
 # Handle clean exit on SIGINT (Ctrl+C)
 signal.signal(signal.SIGINT, clean_exit)
