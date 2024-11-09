@@ -1,6 +1,6 @@
 """
 File Name: check.py
-Version: 1.4
+Version: 1.5
 Date: November 10, 2024
 Description:
     This Python script runs on the server to check that remote nodes are posting keepalive updates.
@@ -8,10 +8,10 @@ Description:
     It writes status changes to the database only when the status changes, minimizing database writes.
     It now includes a curses-based UI to avoid excessive scrolling, provides real-time status updates,
     displays settings from the 'settings' measurement, and uses these settings within the script.
-    Updated to fix settings retrieval issues and enhance error handling.
+    Updated to fix settings retrieval issues and timestamp handling.
 
 Changelog:
-    Version 1.4 - Fixed settings retrieval, enhanced error handling, ensured script functionality.
+    Version 1.5 - Fixed settings retrieval, corrected timestamp handling, ensured script functionality.
 """
 
 import time
@@ -35,15 +35,14 @@ settings_info = {}
 # Function to read settings from InfluxDB in key-value format
 def get_settings():
     try:
-        query = "SELECT * FROM settings ORDER BY time DESC LIMIT 1"
+        query = "SELECT LAST(SETTING) FROM settings GROUP BY SETTING_NAME"
         result = influx_client.query(query)
         settings = {}
         if result:
-            for point in result.get_points():
-                settings_name = point.get('SETTING_NAME')
-                setting_value = point.get('SETTING')
-                if settings_name and setting_value is not None:
-                    settings[settings_name.strip('"')] = setting_value.strip('"') if isinstance(setting_value, str) else setting_value
+            for series in result.raw.get('series', []):
+                setting_name = series['tags'].get('SETTING_NAME').strip('"')
+                setting_value = series['values'][0][1].strip('"') if isinstance(series['values'][0][1], str) else series['values'][0][1]
+                settings[setting_name] = setting_value
             return settings
         else:
             print("Settings query returned no results.")
@@ -95,7 +94,7 @@ def check_node_status(stdscr):
                     clean_exit(None, None)
 
                 # Get list of all MAC addresses from device_status measurement
-                device_status_query = "SELECT LAST(field_status), LAST(tag_external_ip) FROM device_status GROUP BY tag_mac_address"
+                device_status_query = "SELECT * FROM device_status GROUP BY tag_mac_address ORDER BY time DESC LIMIT 1"
                 device_status_result = influx_client.query(device_status_query)
 
                 if not device_status_result:
@@ -115,12 +114,14 @@ def check_node_status(stdscr):
                 row = 5
 
                 # Iterate over each node
-                for series in device_status_result.raw.get('series', []):
-                    mac_address = series['tags']['tag_mac_address']
-                    # Get the time and status from the last device_status point
-                    last_point = series['values'][0]
-                    last_time_str = last_point[0]
-                    last_status = last_point[1]
+                for series in device_status_result:
+                    mac_address = series.tags.get('tag_mac_address')
+                    points = list(series.get_points())
+                    if not points:
+                        continue
+                    point = points[0]
+                    last_time_str = point['time']
+                    last_status = point['field_status']
                     try:
                         # Try parsing timestamp with microseconds
                         last_time = datetime.strptime(last_time_str, '%Y-%m-%dT%H:%M:%S.%fZ')

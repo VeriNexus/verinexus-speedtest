@@ -1,6 +1,6 @@
 """
 File Name: test.py
-Version: 2.8
+Version: 2.9
 Date: November 10, 2024
 Description:
     This Python script monitors network connectivity to the internet, performs device status checks,
@@ -11,7 +11,7 @@ Description:
     and enhance the UI for better clarity and aesthetics.
 
 Changelog:
-    Version 2.8 - Fixed settings retrieval, corrected availability calculations, ensured script functionality.
+    Version 2.9 - Fixed settings retrieval, corrected availability calculations, ensured script functionality.
 """
 
 import time
@@ -51,7 +51,7 @@ status_info = {
     "last_write_status": "Not yet written",
     "external_ip": None,
     "local_ip": None,
-    "version": "2.8",
+    "version": "2.9",
     "db_write_details": "",
     "uptime_percentage_hour": 0.0,
     "uptime_percentage_day": 0.0,
@@ -111,15 +111,14 @@ except Exception as e:
 # Function to read settings from InfluxDB in key-value format
 def get_settings():
     try:
-        query = "SELECT * FROM settings ORDER BY time DESC LIMIT 1"
+        query = "SELECT LAST(SETTING) FROM settings GROUP BY SETTING_NAME"
         result = influx_client.query(query)
         settings = {}
         if result:
-            for point in result.get_points():
-                settings_name = point.get('SETTING_NAME')
-                setting_value = point.get('SETTING')
-                if settings_name and setting_value is not None:
-                    settings[settings_name.strip('"')] = setting_value.strip('"') if isinstance(setting_value, str) else setting_value
+            for series in result.raw.get('series', []):
+                setting_name = series['tags'].get('SETTING_NAME').strip('"')
+                setting_value = series['values'][0][1].strip('"') if isinstance(series['values'][0][1], str) else series['values'][0][1]
+                settings[setting_name] = setting_value
             logging.info("Settings successfully retrieved from InfluxDB.")
             status_info["settings"] = settings
             # Create a string representation for UI display
@@ -269,7 +268,8 @@ def calculate_uptime_percentages():
             points = list(result.get_points())
 
             if not points:
-                uptime_percentage = 100.0 if status_info["current_status"] == 'up' else 0.0
+                current_status = status_info["current_status"]
+                uptime_percentage = 100.0 if current_status == 'up' else 0.0
             else:
                 total_time = 0
                 uptime = 0
