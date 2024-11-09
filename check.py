@@ -1,14 +1,16 @@
 """
 File Name: check.py
-Version: 1.0
-Date: November 8, 2024
+Version: 1.1
+Date: November 9, 2024
 Description:
-    This Python script monitors runs on the server to check that remote nodes are posting update states
-    and if they are not, will proactively mark the node as down until such time that the node is back
-    up and writes it's on up/down status
+    This Python script runs on the server to check that remote nodes are posting keepalive updates.
+    If they are not, it will proactively mark the node as down unless it is marked as suspended.
+    It writes status changes to the database only when the status changes, minimizing database writes.
+    It has been updated to use the keepalive mechanism, handle suspended devices, and avoid duplicate status writes.
 
 Changelog:
-    Version 1.0 - Initial release
+    Version 1.0 - Initial release.
+    Version 1.1 - Implemented keepalive mechanism, handled suspended devices, optimized database writes.
 """
 
 import time
@@ -22,48 +24,70 @@ influx_client = InfluxDBClient(host="speedtest.verinexus.com", port=8086, databa
 
 def check_node_status():
     try:
-        # Query to get the last field_status per tag_mac_address
-        query = "SELECT LAST(field_status) FROM device_status GROUP BY tag_mac_address"
-        result = influx_client.query(query)
-        
-        # Check if there are any results
-        if not result:
-            print("No data found in the database.")
+        # Get list of all MAC addresses from keepalive measurement
+        keepalive_query = "SELECT LAST(field_mac_address) FROM keepalive GROUP BY tag_mac_address"
+        keepalive_result = influx_client.query(keepalive_query)
+
+        if not keepalive_result:
+            print("No keepalive data found in the database.")
             return
 
-        # Iterate over each series (grouped by tag_mac_address)
-        for series in result.raw.get('series', []):
+        # Iterate over each node
+        for series in keepalive_result.raw.get('series', []):
             mac_address = series['tags']['tag_mac_address']
-            # Get the time and status from the last point
-            last_point = series['values'][0]
-            last_time_str = last_point[0]
-            last_status = last_point[1]
+            # Get the time from the last keepalive point
+            last_keepalive_point = series['values'][0]
+            last_keepalive_time_str = last_keepalive_point[0]
             try:
                 # Try parsing timestamp with microseconds
-                last_time = datetime.strptime(last_time_str, '%Y-%m-%dT%H:%M:%S.%fZ')
+                last_keepalive_time = datetime.strptime(last_keepalive_time_str, '%Y-%m-%dT%H:%M:%S.%fZ')
             except ValueError:
                 # Fallback to parsing without microseconds
-                last_time = datetime.strptime(last_time_str, '%Y-%m-%dT%H:%M:%SZ')
-            time_diff = (datetime.utcnow() - last_time).total_seconds()
+                last_keepalive_time = datetime.strptime(last_keepalive_time_str, '%Y-%m-%dT%H:%M:%SZ')
+            time_diff = (datetime.utcnow() - last_keepalive_time).total_seconds()
+
             # Define the threshold (e.g., 120 seconds)
             threshold = 120  # Adjust as needed
-            if time_diff > threshold and last_status != 'down':
-                # Write a 'down' status to the database
+
+            # Check if the device is suspended
+            suspended_query = f"SELECT * FROM suspended_devices WHERE tag_mac_address='{mac_address}'"
+            suspended_result = influx_client.query(suspended_query)
+            is_suspended = bool(suspended_result)
+
+            # Get the last known status
+            status_query = f"SELECT LAST(field_status) FROM device_status WHERE tag_mac_address='{mac_address}'"
+            status_result = influx_client.query(status_query)
+            if status_result:
+                last_status_series = status_result.raw.get('series', [])[0]
+                last_status = last_status_series['values'][0][1]
+            else:
+                last_status = None
+
+            # Determine the new status
+            if is_suspended:
+                new_status = 'maintenance'
+            elif time_diff > threshold:
+                new_status = 'down'
+            else:
+                new_status = 'up'
+
+            # Write the new status only if it has changed
+            if last_status != new_status:
                 json_body = [{
                     "measurement": "device_status",
                     "tags": {
                         "tag_mac_address": mac_address,
-                        "tag_external_ip": "unknown"  # Since we don't have the external IP here
+                        "tag_external_ip": "unknown"  # Since we may not have the external IP here
                     },
                     "time": datetime.utcnow().isoformat() + 'Z',
                     "fields": {
-                        "field_status": "down"
+                        "field_status": new_status
                     }
                 }]
                 influx_client.write_points(json_body)
-                print(f"Wrote 'down' status for MAC address {mac_address} due to inactivity.")
+                print(f"Status for MAC address {mac_address} changed to '{new_status}'.")
             else:
-                print(f"MAC address {mac_address} is active. Last status: {last_status}, Last time: {last_time_str}")
+                print(f"No status change for MAC address {mac_address} (status: '{last_status}').")
     except Exception as e:
         print(f"Error in check_node_status: {e}")
 

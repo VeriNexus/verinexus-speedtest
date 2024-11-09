@@ -1,14 +1,14 @@
 """
 File Name: test.py
-Version: 2.4
-Date: October 30, 2023
+Version: 2.5
+Date: November 9, 2024
 Description:
     This Python script monitors network connectivity to the internet, performs device status checks,
     writes aggregated data to InfluxDB, synchronizes time using NTP, and sends email alerts when necessary.
     It uses `curses` for a static display and allows simulating network disconnection and reconnection with key presses.
     It implements efficient data storage and a clean exit mechanism.
-    It has been updated to fix MAC address retrieval, improve data writing efficiency, enhance script termination,
-    and include uptime statistics and version display in the UI.
+    It has been updated to optimize database writes, implement a keepalive mechanism, handle suspended devices,
+    cache writes during connectivity loss, fix uptime calculations, and include version display in the UI.
 
 Changelog:
     Version 1.0 - Initial release with console-based output and simulated monitoring logic.
@@ -22,6 +22,7 @@ Changelog:
     Version 2.2 - Implemented efficient data storage, clean exit mechanism, and used MAC address as device ID.
     Version 2.3 - Fixed MAC address retrieval, improved data writing efficiency, enhanced script termination, and removed redundant fields.
     Version 2.4 - Added version display in UI, detailed database write information, and uptime statistics over last hour, day, and month.
+    Version 2.5 - Optimized database writes, implemented keepalive mechanism, handled suspended devices, improved caching, fixed uptime calculations, and enhanced UI.
 """
 
 import time
@@ -60,11 +61,10 @@ status_info = {
     "current_status": "unknown",
     "last_write_status": "Not yet written",
     "external_ip": None,
-    "version": "2.4",
+    "version": "2.5",
     "db_write_details": "",
-    "uptime_last_hour": 0,
-    "uptime_last_day": 0,
-    "uptime_last_month": 0
+    "uptime_percentage": 0.0,
+    "is_suspended": False
 }
 
 # Local cache for status events
@@ -87,7 +87,7 @@ def get_mac_address():
 # Function to get external IP address
 def get_external_ip():
     try:
-        ip = requests.get('https://api.ipify.org').text
+        ip = requests.get('https://api.ipify.org', timeout=5).text
         return ip
     except Exception as e:
         logging.error(f"Error retrieving external IP address: {e}")
@@ -125,16 +125,38 @@ def get_settings():
         logging.error(f"Failed to retrieve settings from InfluxDB: {e}")
         return None
 
-# Function to synchronize time using NTP
-def synchronize_time(ntp_server):
+# Function to check if the device is suspended
+def check_if_suspended():
     try:
-        client = ntplib.NTPClient()
-        response = client.request(ntp_server, version=3)
-        logging.info("Time successfully synchronized using NTP.")
-        return response.tx_time  # NTP time in UTC
+        query = f"SELECT * FROM suspended_devices WHERE tag_mac_address='{DEVICE_MAC}'"
+        result = influx_client.query(query)
+        if result:
+            logging.info(f"Device {DEVICE_MAC} is suspended.")
+            return True
+        else:
+            logging.info(f"Device {DEVICE_MAC} is not suspended.")
+            return False
     except Exception as e:
-        logging.warning(f"Failed to synchronize time using NTP: {e}")
-        return time.time()  # Fallback to local time
+        logging.error(f"Failed to check suspended status: {e}")
+        return False
+
+# Function to write keepalive to InfluxDB
+def write_keepalive():
+    try:
+        json_body = [{
+            "measurement": "keepalive",
+            "tags": {
+                "tag_mac_address": DEVICE_MAC
+            },
+            "time": datetime.utcnow().isoformat() + 'Z',
+            "fields": {
+                "field_mac_address": DEVICE_MAC
+            }
+        }]
+        influx_client.write_points(json_body)
+        logging.debug(f"Keepalive written for {DEVICE_MAC}.")
+    except Exception as e:
+        logging.error(f"Failed to write keepalive: {e}")
 
 # Function to cache and write status to InfluxDB
 def write_status_to_influxdb():
@@ -195,25 +217,17 @@ def clean_exit(signum, frame):
     curses.endwin()
     sys.exit(0)
 
-# Function to calculate uptime statistics
-def calculate_uptime_statistics():
+# Function to calculate uptime percentage
+def calculate_uptime_percentage():
     try:
-        now = datetime.utcnow()
-        queries = {
-            "last_hour": f"SELECT COUNT(field_status) FROM device_status WHERE time > now() - 1h AND tag_mac_address='{DEVICE_MAC}' AND field_status='up'",
-            "last_day": f"SELECT COUNT(field_status) FROM device_status WHERE time > now() - 24h AND tag_mac_address='{DEVICE_MAC}' AND field_status='up'",
-            "last_month": f"SELECT COUNT(field_status) FROM device_status WHERE time > now() - 30d AND tag_mac_address='{DEVICE_MAC}' AND field_status='up'"
-        }
-        for period, query in queries.items():
-            result = influx_client.query(query)
-            points = list(result.get_points())
-            if points:
-                count = points[0]['count']
-                status_info[f'uptime_{period}'] = count * status_info["settings"].get("STATUS_INTERVAL", 2)
-            else:
-                status_info[f'uptime_{period}'] = 0
+        total_time = status_info["uptime"] + status_info["downtime"]
+        if total_time > 0:
+            status_info["uptime_percentage"] = (status_info["uptime"] / total_time) * 100
+        else:
+            status_info["uptime_percentage"] = 0.0
     except Exception as e:
-        logging.error(f"Error calculating uptime statistics: {e}")
+        logging.error(f"Error calculating uptime percentage: {e}")
+        status_info["uptime_percentage"] = 0.0
 
 # Monitoring loop with full functionality
 def monitor_device(stdscr):
@@ -227,6 +241,7 @@ def monitor_device(stdscr):
     alert_threshold = int(settings.get("ALERT_THRESHOLD", "120"))
     status_interval = int(settings.get("STATUS_INTERVAL", "2"))
     write_interval = int(settings.get("WRITE_INTERVAL", "60"))
+    keepalive_interval = int(settings.get("KEEPALIVE_INTERVAL", "30"))
     email_subject = settings.get("EMAIL_SUBJECT", "Alert")
     email_recipients = settings.get("MAIL_RECIPIENT", "").split(",")
     smtp_settings = {
@@ -242,7 +257,8 @@ def monitor_device(stdscr):
     last_alert_time = 0  # To implement cooldown for alerts
     alert_cooldown = 300  # 5-minute cooldown period
     last_write_time = time.time()
-    last_stats_time = time.time()
+    last_keepalive_time = time.time()
+    last_status = None
 
     # Initialize curses
     curses.curs_set(0)  # Hide the cursor
@@ -251,6 +267,9 @@ def monitor_device(stdscr):
 
     simulate_disconnect = False
     is_running = True
+
+    # Check if the device is suspended
+    status_info["is_suspended"] = check_if_suspended()
 
     while is_running:
         try:
@@ -264,6 +283,12 @@ def monitor_device(stdscr):
                 clean_exit(None, None)
 
             current_time = datetime.now(timezone.utc).isoformat()
+
+            # Write keepalive at the specified interval
+            if time.time() - last_keepalive_time >= keepalive_interval:
+                write_keepalive()
+                last_keepalive_time = time.time()
+
             if time.time() - last_heartbeat > alert_threshold and not alert_triggered:
                 if time.time() - last_alert_time > alert_cooldown:
                     send_email_alert(smtp_settings, email_subject, f"Device {DEVICE_MAC} is down.", email_recipients)
@@ -276,25 +301,34 @@ def monitor_device(stdscr):
                 status_info["uptime"] += status_interval
                 status_info["last_up"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                 alert_triggered = False
-                status_info["current_status"] = "up"
+                current_status = "up"
             else:
                 status_info["downtime"] += status_interval
                 status_info["last_down"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                status_info["current_status"] = "down"
+                current_status = "down"
 
-            # Aggregate status events
-            if not status_events or status_events[-1]["status"] != status_info["current_status"]:
-                status_events.append({"status": status_info["current_status"], "timestamp": current_time})
+            # Calculate uptime percentage
+            calculate_uptime_percentage()
+
+            # Update status_info
+            status_info["current_status"] = current_status
+
+            # Check if the device is suspended
+            status_info["is_suspended"] = check_if_suspended()
+
+            # If the device is suspended, do not send status updates
+            if status_info["is_suspended"]:
+                current_status = "maintenance"
+
+            # Aggregate status events only if status changes
+            if current_status != last_status:
+                status_events.append({"status": current_status, "timestamp": current_time})
+                last_status = current_status
 
             # Write to InfluxDB at the specified interval
             if time.time() - last_write_time >= write_interval:
                 write_status_to_influxdb()
                 last_write_time = time.time()
-
-            # Calculate uptime statistics every 5 minutes
-            if time.time() - last_stats_time >= 300:
-                calculate_uptime_statistics()
-                last_stats_time = time.time()
 
             # Update the display
             stdscr.clear()
@@ -305,17 +339,16 @@ def monitor_device(stdscr):
             stdscr.addstr(4, 0, f"External IP: {EXTERNAL_IP}")
             stdscr.addstr(5, 0, f"Uptime: {status_info['uptime']} seconds")
             stdscr.addstr(6, 0, f"Downtime: {status_info['downtime']} seconds")
-            stdscr.addstr(7, 0, f"Last Up: {status_info['last_up']}")
-            stdscr.addstr(8, 0, f"Last Down: {status_info['last_down']}")
-            stdscr.addstr(9, 0, f"Last DB Write: {status_info['last_db_write']}")
-            stdscr.addstr(10, 0, f"Last Write Status: {status_info['last_write_status']}")
-            stdscr.addstr(11, 0, f"Current Status: {status_info['current_status']}")
-            stdscr.addstr(12, 0, f"Uptime Last Hour: {status_info.get('uptime_last_hour', 0)} seconds")
-            stdscr.addstr(13, 0, f"Uptime Last Day: {status_info.get('uptime_last_day', 0)} seconds")
-            stdscr.addstr(14, 0, f"Uptime Last Month: {status_info.get('uptime_last_month', 0)} seconds")
-            stdscr.addstr(15, 0, f"DB Write Details: {status_info['db_write_details']}")
-            stdscr.addstr(16, 0, "="*70)
-            stdscr.addstr(17, 0, "Press 'd' to simulate disconnect, 'c' to reconnect, 'q' to quit.".center(70))
+            stdscr.addstr(7, 0, f"Uptime Percentage: {status_info['uptime_percentage']:.2f}%")
+            stdscr.addstr(8, 0, f"Last Up: {status_info['last_up']}")
+            stdscr.addstr(9, 0, f"Last Down: {status_info['last_down']}")
+            stdscr.addstr(10, 0, f"Last DB Write: {status_info['last_db_write']}")
+            stdscr.addstr(11, 0, f"Last Write Status: {status_info['last_write_status']}")
+            stdscr.addstr(12, 0, f"Current Status: {status_info['current_status']}")
+            stdscr.addstr(13, 0, f"Suspended: {'Yes' if status_info['is_suspended'] else 'No'}")
+            stdscr.addstr(14, 0, f"DB Write Details: {status_info['db_write_details']}")
+            stdscr.addstr(15, 0, "="*70)
+            stdscr.addstr(16, 0, "Press 'd' to simulate disconnect, 'c' to reconnect, 'q' to quit.".center(70))
             stdscr.refresh()
 
             time.sleep(status_interval)
