@@ -1,14 +1,14 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 3.7.0
-# Date: 07/11/2024
+# Version: 3.8.0
+# Date: 12/11/2024
 
 # Description:
 # This script performs various network tests and uploads the results to InfluxDB.
-# Now includes a suspension check to prevent tests from running on suspended devices.
+# Now includes an option to flag tests as "on-demand" when triggered via MQTT.
 
 # Version number of the script
-SCRIPT_VERSION="3.7.0"
+SCRIPT_VERSION="3.8.0"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -292,6 +292,14 @@ check_and_install_dependencies
 # Get active interface and MAC address
 get_active_interface_and_mac
 
+# Process command-line arguments
+ONDEMAND="false"
+for arg in "$@"; do
+    if [ "$arg" == "--ondemand" ]; then
+        ONDEMAND="true"
+    fi
+done
+
 # Check suspension status
 check_suspension_status
 
@@ -424,6 +432,7 @@ FIELDS=""
 [ -n "$ESCAPED_SERVER_NAME" ] && FIELDS+=",field_server_name=\"$ESCAPED_SERVER_NAME\""
 [ -n "$ESCAPED_SHARE_ID" ] && FIELDS+=",field_share_id=\"$ESCAPED_SHARE_ID\""
 [ -n "$ESCAPED_SCRIPT_VERSION" ] && FIELDS+=",field_script_version=\"$ESCAPED_SCRIPT_VERSION\""
+FIELDS+=",field_ondemand=$ONDEMAND"
 
 # Remove leading comma if necessary
 FIELDS=$(echo "$FIELDS" | sed 's/^,//')
