@@ -1,20 +1,20 @@
 """
 File Name: test.py
-Version: 3.3
+Version: 2.7
 Date: November 10, 2024
 Description:
     This Python script monitors network connectivity to the internet, performs device status checks,
     writes aggregated data to InfluxDB, synchronizes time using NTP, and sends email alerts when necessary.
     It uses `curses` for a dynamic display and allows simulating network disconnection and reconnection with key presses.
     It implements efficient data storage and a clean exit mechanism.
-    Version 3.3 fixes the issue where the script did not check if the status differs before writing,
-    by retrieving the last known status from the database and comparing it before writing a new status.
+    Version 2.7 aligns script settings with the InfluxDB settings measurement, adds external IP to the keepalive measurement,
+    and enhances the UI with settings display, countdown timers, and real-time status updates.
 
 Changelog:
-    Version 3.2 - Corrected handling of `KEEPALIVE` and `STATUS_INTERVAL`, ensured deletion of previous `keepalive` entries,
-                  enforced MAC address-specific updates, and improved logging and UI.
-    Version 3.3 - Implemented retrieval of last status from the database to compare before writing new status,
-                  fixed issues with unnecessary status writes, and updated version and date.
+    Version 2.6 - Deleted old keepalives upon writing new ones, wrote current status at startup, calculated uptime percentages over specific periods,
+                  enhanced UI with status write info, displayed DB status and local IP, and improved overall UI aesthetics.
+    Version 2.7 - Aligned script settings with settings measurement, added external IP to keepalive measurement,
+                  enhanced UI with settings display and countdown timers, and updated version and date.
 """
 
 import time
@@ -30,7 +30,6 @@ import signal
 import netifaces
 import sys
 import requests
-import ipaddress
 import subprocess
 
 # Setup logging with a rotating file handler
@@ -53,7 +52,7 @@ status_info = {
     "last_write_status": "Not yet written",
     "external_ip": None,
     "local_ip": None,
-    "version": "3.3",
+    "version": "2.7",
     "db_write_details": "",
     "uptime_percentage_hour": 0.0,
     "uptime_percentage_day": 0.0,
@@ -62,6 +61,9 @@ status_info = {
     "db_current_status": "unknown",
     "status_write_info": "",
     "settings_display": "",
+    "next_keepalive_in": 0,
+    "next_db_write_in": 0,
+    "next_status_check_in": 0,
 }
 
 # Local cache for status events
@@ -118,7 +120,7 @@ def get_settings():
         settings = {}
         if result:
             for series in result.raw.get('series', []):
-                setting_name = series['tags'].get('SETTING_NAME').strip('"')
+                setting_name = series['tags']['SETTING_NAME'].strip('"')
                 setting_value = series['values'][0][1]
                 if isinstance(setting_value, str):
                     setting_value = setting_value.strip('"')
@@ -135,12 +137,12 @@ def get_settings():
                 "SMTP_SERVER": "SMTP server for sending emails",
                 "SMTP_LOGIN": "SMTP login username",
                 "SMTP_PASSWORD": "SMTP login password",
-                "STATUS_INTERVAL": "Interval for checking status (seconds)",
+                "POLL_INTERVAL": "Interval for checking status (seconds)",
                 "DETECTION_ENDPOINT": "Endpoint to check for internet connectivity",
                 "SMTP_PORT": "SMTP server port",
                 "HEARTBEAT": "Heartbeat interval for server checks (seconds)",
                 "KEEPALIVE": "Interval for keepalive messages (seconds)",
-                "NODE_UPDATE": "Interval for updating node status (seconds)",
+                "DB_UPDATE": "Interval for updating database (seconds)",
             }
             settings_display_lines = []
             for k, v in settings.items():
@@ -189,12 +191,12 @@ def write_keepalive():
         influx_client.query(delete_query)
         logging.debug(f"Old keepalive entries deleted for {DEVICE_MAC}.")
 
-        # Write new keepalive
+        # Write new keepalive with external IP
         json_body = [{
             "measurement": "keepalive",
             "tags": {
                 "tag_mac_address": DEVICE_MAC,
-                "tag_external_ip": EXTERNAL_IP
+                "tag_external_ip": EXTERNAL_IP if EXTERNAL_IP else "unknown"
             },
             "time": datetime.utcnow().isoformat() + 'Z',
             "fields": {
@@ -202,7 +204,7 @@ def write_keepalive():
             }
         }]
         influx_client.write_points(json_body)
-        logging.debug(f"Keepalive written for {DEVICE_MAC}.")
+        logging.debug(f"Keepalive written for {DEVICE_MAC} with external IP {EXTERNAL_IP}.")
     except Exception as e:
         logging.error(f"Failed to write keepalive: {e}")
 
@@ -253,37 +255,15 @@ def write_status_to_influxdb(force_write=False):
         status_info["status_write_info"] = f"Failed to write status: {e}"
         logging.error(f"Failed to write status to InfluxDB: {e}")
 
-# Function to send email alerts with cooldown
-def send_email_alert(smtp_settings, subject, message, recipients):
-    try:
-        msg = MIMEText(message)
-        msg["Subject"] = subject
-        msg["From"] = smtp_settings["email_from"]
-        msg["To"] = ", ".join(recipients)
-        with smtplib.SMTP(smtp_settings["smtp_server"], int(smtp_settings["smtp_port"])) as server:
-            server.starttls()
-            if smtp_settings["smtp_login"] and smtp_settings["smtp_password"]:
-                server.login(smtp_settings["smtp_login"], smtp_settings["smtp_password"])
-            server.sendmail(smtp_settings["email_from"], recipients, msg.as_string())
-        logging.info(f"Email alert sent to {', '.join(recipients)}.")
-    except Exception as e:
-        logging.error(f"Failed to send email alert: {e}")
-
 # Function to check internet connectivity using DETECTION_ENDPOINT
 def check_internet_connectivity(endpoint):
     try:
         # Check if endpoint is an IP address
         try:
-            ipaddress.ip_address(endpoint)
-            # It's an IP address, use ping
             subprocess.check_call(["ping", "-c", "1", "-W", "1", endpoint], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
-        except ValueError:
-            # Not an IP address, assume it's a URL
-            if not endpoint.startswith('http://') and not endpoint.startswith('https://'):
-                endpoint = 'http://' + endpoint
-            response = requests.get(endpoint, timeout=5)
-            return response.status_code == 200
+        except subprocess.CalledProcessError:
+            return False
     except Exception as e:
         logging.debug(f"Internet connectivity check failed using endpoint {endpoint}: {e}")
         return False
@@ -383,14 +363,33 @@ def monitor_device(stdscr):
     ntp_server = settings.get("NTP_SERVER", "pool.ntp.org")
     synchronize_time(ntp_server)
 
-    # Read settings
-    detection_endpoint = settings.get("DETECTION_ENDPOINT", "https://www.google.com")
-    status_interval = int(settings.get("STATUS_INTERVAL", "2"))
-    keepalive_interval = int(settings.get("KEEPALIVE", "60"))
-    node_update_interval = int(settings.get("NODE_UPDATE", "120"))
+    # Read settings and map them
+    detection_endpoint = settings.get("DETECTION_ENDPOINT", "8.8.8.8")
+    try:
+        status_interval = int(settings.get("POLL_INTERVAL", "2"))
+    except ValueError:
+        status_interval = 2
+        logging.warning("Invalid POLL_INTERVAL setting. Defaulting to 2 seconds.")
+
+    try:
+        keepalive_interval = int(settings.get("KEEPALIVE", "60"))
+    except ValueError:
+        keepalive_interval = 60
+        logging.warning("Invalid KEEPALIVE setting. Defaulting to 60 seconds.")
+
+    try:
+        write_interval = int(settings.get("DB_UPDATE", "60"))
+    except ValueError:
+        write_interval = 60
+        logging.warning("Invalid DB_UPDATE setting. Defaulting to 60 seconds.")
 
     # Other settings
-    alert_threshold = int(settings.get("ALERT_THRESHOLD", "120"))
+    try:
+        alert_threshold = int(settings.get("ALERT_THRESHOLD", "120"))
+    except ValueError:
+        alert_threshold = 120
+        logging.warning("Invalid ALERT_THRESHOLD setting. Defaulting to 120 seconds.")
+
     email_subject = settings.get("EMAIL_SUBJECT", "Alert")
     email_recipients = settings.get("MAIL_RECIPIENT", "").split(",")
     smtp_settings = {
@@ -404,9 +403,9 @@ def monitor_device(stdscr):
     # Log settings usage
     logging.info(f"Using NTP_SERVER: {ntp_server}")
     logging.info(f"Using DETECTION_ENDPOINT: {detection_endpoint}")
-    logging.info(f"Using STATUS_INTERVAL: {status_interval}")
+    logging.info(f"Using POLL_INTERVAL: {status_interval}")
     logging.info(f"Using KEEPALIVE_INTERVAL: {keepalive_interval}")
-    logging.info(f"Using NODE_UPDATE_INTERVAL: {node_update_interval}")
+    logging.info(f"Using DB_UPDATE: {write_interval}")
     logging.info(f"Using ALERT_THRESHOLD: {alert_threshold}")
     logging.info(f"Using EMAIL_SUBJECT: {email_subject}")
     logging.info(f"Using EMAIL_RECIPIENTS: {email_recipients}")
@@ -417,6 +416,7 @@ def monitor_device(stdscr):
     last_alert_time = 0  # To implement cooldown for alerts
     alert_cooldown = 300  # 5-minute cooldown period
     last_keepalive_time = time.time()
+    last_write_time = time.time()
     last_status = None
     last_status_written = False
 
@@ -454,12 +454,17 @@ def monitor_device(stdscr):
             current_time = datetime.now(timezone.utc).isoformat()
             current_epoch_time = time.time()
 
+            # Update countdown timers
+            status_info["next_keepalive_in"] = max(0, int(keepalive_interval - (current_epoch_time - last_keepalive_time)))
+            status_info["next_db_write_in"] = max(0, int(write_interval - (current_epoch_time - last_write_time)))
+            status_info["next_status_check_in"] = max(0, int(status_interval - (current_epoch_time - status_check_timer)))
+
             # Write keepalive at the specified interval
             if current_epoch_time - last_keepalive_time >= keepalive_interval:
                 write_keepalive()
                 last_keepalive_time = current_epoch_time
 
-            # Check internet connectivity at STATUS_INTERVAL
+            # Check internet connectivity at POLL_INTERVAL
             if current_epoch_time - status_check_timer >= status_interval:
                 if not simulate_disconnect and check_internet_connectivity(detection_endpoint):
                     last_heartbeat = current_epoch_time
@@ -495,15 +500,16 @@ def monitor_device(stdscr):
 
                 status_check_timer = current_epoch_time
 
-            # Write to InfluxDB if status changed
-            if not last_status_written:
+            # Write to InfluxDB at the specified interval or if status changed
+            if current_epoch_time - last_write_time >= write_interval or not last_status_written:
                 write_status_to_influxdb()
+                last_write_time = current_epoch_time
                 last_status_written = True
 
             # Calculate uptime percentages over periods
             calculate_uptime_percentages()
 
-            # Update the display with colors
+            # Update the display
             stdscr.clear()
             stdscr.addstr(0, 0, "="*80)
             stdscr.addstr(1, 0, f"VeriNexus Monitoring System - Version {status_info['version']}".center(80))
@@ -524,19 +530,22 @@ def monitor_device(stdscr):
             stdscr.addstr(16, 0, f"Current Status: {status_info['current_status']}")
             stdscr.addstr(17, 0, f"DB Status: {status_info['db_current_status']}")
             stdscr.addstr(18, 0, f"Suspended: {'Yes' if status_info['is_suspended'] else 'No'}")
-            stdscr.addstr(19, 0, "="*80)
-            stdscr.addstr(20, 0, "Settings:")
+            stdscr.addstr(19, 0, f"Next Keepalive Write In: {status_info['next_keepalive_in']}s")
+            stdscr.addstr(20, 0, f"Next DB Write In: {status_info['next_db_write_in']}s")
+            stdscr.addstr(21, 0, f"Next Status Check In: {status_info['next_status_check_in']}s")
+            stdscr.addstr(22, 0, "="*80)
+            stdscr.addstr(23, 0, "Settings:")
             settings_lines = status_info["settings_display"].split('\n')
             for idx, line in enumerate(settings_lines):
-                stdscr.addstr(21 + idx, 0, line)
-            stdscr.addstr(21 + len(settings_lines), 0, "="*80)
-            stdscr.addstr(22 + len(settings_lines), 0, "Press 'd' to simulate disconnect, 'c' to reconnect, 'q' to quit.".center(80))
+                stdscr.addstr(24 + idx, 0, line)
+            stdscr.addstr(24 + len(settings_lines), 0, "="*80)
+            stdscr.addstr(25 + len(settings_lines), 0, "Press 'd' to simulate disconnect, 'c' to reconnect, 'q' to quit.".center(80))
             stdscr.refresh()
 
             time.sleep(1)
         except Exception as e:
             logging.error(f"Error in monitoring loop: {e}")
-            stdscr.addstr(23 + len(settings_lines), 0, f"Error: {e}")
+            stdscr.addstr(26 + len(settings_lines), 0, f"Error: {e}")
             stdscr.refresh()
             time.sleep(1)
 
