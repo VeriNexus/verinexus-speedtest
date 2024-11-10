@@ -1,20 +1,20 @@
 """
 File Name: test.py
-Version: 2.7
-Date: November 10, 2024
+Version: 2.8
+Date: November 11, 2024
 Description:
     This Python script monitors network connectivity to the internet, performs device status checks,
-    writes aggregated data to InfluxDB, synchronizes time using NTP, and sends email alerts when necessary.
+    writes aggregated data to InfluxDB, synchronizes time using NTP, and manages suspended status.
     It uses `curses` for a dynamic display and allows simulating network disconnection and reconnection with key presses.
     It implements efficient data storage and a clean exit mechanism.
-    Version 2.7 aligns script settings with the InfluxDB settings measurement, adds external IP to the keepalive measurement,
-    and enhances the UI with settings display, countdown timers, and real-time status updates.
+    Version 2.8 enhances the UI for better clarity and usability, removes unused settings from the UI,
+    fixes missing or incorrect data, and reorganizes the UI for better readability.
 
 Changelog:
-    Version 2.6 - Deleted old keepalives upon writing new ones, wrote current status at startup, calculated uptime percentages over specific periods,
-                  enhanced UI with status write info, displayed DB status and local IP, and improved overall UI aesthetics.
     Version 2.7 - Aligned script settings with settings measurement, added external IP to keepalive measurement,
                   enhanced UI with settings display and countdown timers, and updated version and date.
+    Version 2.8 - Removed unused settings from the UI, fixed missing or incorrect data fields,
+                  reorganized the UI for better presentation, and ensured all functionality is retained.
 """
 
 import time
@@ -23,8 +23,6 @@ import logging
 from logging.handlers import RotatingFileHandler
 from influxdb import InfluxDBClient
 import ntplib
-from email.mime.text import MIMEText
-import smtplib
 import curses
 import signal
 import netifaces
@@ -52,14 +50,11 @@ status_info = {
     "last_write_status": "Not yet written",
     "external_ip": None,
     "local_ip": None,
-    "version": "2.7",
-    "db_write_details": "",
+    "version": "2.8",
     "uptime_percentage_hour": 0.0,
     "uptime_percentage_day": 0.0,
     "uptime_percentage_month": 0.0,
     "is_suspended": False,
-    "db_current_status": "unknown",
-    "status_write_info": "",
     "settings_display": "",
     "next_keepalive_in": 0,
     "next_db_write_in": 0,
@@ -130,22 +125,15 @@ def get_settings():
             # Create a string representation for UI display
             settings_descriptions = {
                 "NTP_SERVER": "NTP server for time synchronization",
-                "MAIL_RECIPIENT": "Recipient(s) for email alerts",
-                "ALERT_THRESHOLD": "Threshold for triggering alerts (seconds)",
-                "EMAIL_SUBJECT": "Subject line for alert emails",
-                "EMAIL_FROM": "Sender email address for alerts",
-                "SMTP_SERVER": "SMTP server for sending emails",
-                "SMTP_LOGIN": "SMTP login username",
-                "SMTP_PASSWORD": "SMTP login password",
                 "POLL_INTERVAL": "Interval for checking status (seconds)",
                 "DETECTION_ENDPOINT": "Endpoint to check for internet connectivity",
-                "SMTP_PORT": "SMTP server port",
-                "HEARTBEAT": "Heartbeat interval for server checks (seconds)",
                 "KEEPALIVE": "Interval for keepalive messages (seconds)",
                 "DB_UPDATE": "Interval for updating database (seconds)",
             }
+            relevant_settings = ["DETECTION_ENDPOINT", "NTP_SERVER", "KEEPALIVE", "DB_UPDATE", "POLL_INTERVAL"]
             settings_display_lines = []
-            for k, v in settings.items():
+            for k in relevant_settings:
+                v = settings.get(k, "Not Set")
                 description = settings_descriptions.get(k, "No description available")
                 settings_display_lines.append(f"{k}: {v} ({description})")
             status_info["settings_display"] = "\n".join(settings_display_lines)
@@ -243,22 +231,17 @@ def write_status_to_influxdb(force_write=False):
             influx_client.write_points(json_body)
             status_info["last_db_write"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
             status_info["last_write_status"] = f"Wrote {len(json_body)} event(s)"
-            status_info["db_write_details"] = f"Events: {status_events}"
-            status_info["status_write_info"] = "Status written due to change or scheduled update."
             logging.debug(f"Wrote {len(json_body)} event(s) to InfluxDB.")
             status_events.clear()  # Clear the cache after successful write
         else:
-            status_info["status_write_info"] = "No status change; data not written."
             logging.debug("No status events to write.")
     except Exception as e:
         status_info["last_write_status"] = f"Write failed: {e}"
-        status_info["status_write_info"] = f"Failed to write status: {e}"
         logging.error(f"Failed to write status to InfluxDB: {e}")
 
 # Function to check internet connectivity using DETECTION_ENDPOINT
 def check_internet_connectivity(endpoint):
     try:
-        # Check if endpoint is an IP address
         try:
             subprocess.check_call(["ping", "-c", "1", "-W", "1", endpoint], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return True
@@ -331,21 +314,6 @@ def calculate_uptime_percentages():
         for period_name in ["hour", "day", "month"]:
             status_info[f'uptime_percentage_{period_name}'] = 0.0
 
-# Function to get current status from the database
-def get_db_current_status():
-    try:
-        query = f"SELECT LAST(field_status) FROM device_status WHERE tag_mac_address='{DEVICE_MAC}'"
-        result = influx_client.query(query)
-        if result:
-            last_status_series = result.raw.get('series', [])[0]
-            db_status = last_status_series['values'][0][1]
-            status_info["db_current_status"] = db_status
-        else:
-            status_info["db_current_status"] = "unknown"
-    except Exception as e:
-        logging.error(f"Error retrieving DB current status: {e}")
-        status_info["db_current_status"] = "unknown"
-
 # Monitoring loop with full functionality
 def monitor_device(stdscr):
     settings = get_settings()
@@ -383,38 +351,13 @@ def monitor_device(stdscr):
         write_interval = 60
         logging.warning("Invalid DB_UPDATE setting. Defaulting to 60 seconds.")
 
-    # Other settings
-    try:
-        alert_threshold = int(settings.get("ALERT_THRESHOLD", "120"))
-    except ValueError:
-        alert_threshold = 120
-        logging.warning("Invalid ALERT_THRESHOLD setting. Defaulting to 120 seconds.")
-
-    email_subject = settings.get("EMAIL_SUBJECT", "Alert")
-    email_recipients = settings.get("MAIL_RECIPIENT", "").split(",")
-    smtp_settings = {
-        "smtp_server": settings.get("SMTP_SERVER", ""),
-        "smtp_port": settings.get("SMTP_PORT", "587"),
-        "smtp_login": settings.get("SMTP_LOGIN", ""),
-        "smtp_password": settings.get("SMTP_PASSWORD", ""),
-        "email_from": settings.get("EMAIL_FROM", "")
-    }
-
     # Log settings usage
     logging.info(f"Using NTP_SERVER: {ntp_server}")
     logging.info(f"Using DETECTION_ENDPOINT: {detection_endpoint}")
     logging.info(f"Using POLL_INTERVAL: {status_interval}")
-    logging.info(f"Using KEEPALIVE_INTERVAL: {keepalive_interval}")
+    logging.info(f"Using KEEPALIVE: {keepalive_interval}")
     logging.info(f"Using DB_UPDATE: {write_interval}")
-    logging.info(f"Using ALERT_THRESHOLD: {alert_threshold}")
-    logging.info(f"Using EMAIL_SUBJECT: {email_subject}")
-    logging.info(f"Using EMAIL_RECIPIENTS: {email_recipients}")
-    logging.info(f"Using SMTP_SETTINGS: {smtp_settings}")
 
-    last_heartbeat = time.time()
-    alert_triggered = False
-    last_alert_time = 0  # To implement cooldown for alerts
-    alert_cooldown = 300  # 5-minute cooldown period
     last_keepalive_time = time.time()
     last_write_time = time.time()
     last_status = None
@@ -437,6 +380,7 @@ def monitor_device(stdscr):
 
     # Get last status from database
     last_db_status = get_last_status_from_db()
+    status_info["db_current_status"] = last_db_status if last_db_status else "unknown"
 
     status_check_timer = time.time()
 
@@ -467,14 +411,14 @@ def monitor_device(stdscr):
             # Check internet connectivity at POLL_INTERVAL
             if current_epoch_time - status_check_timer >= status_interval:
                 if not simulate_disconnect and check_internet_connectivity(detection_endpoint):
-                    last_heartbeat = current_epoch_time
                     status_info["uptime"] += status_interval
-                    status_info["last_up"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-                    alert_triggered = False
+                    if status_info["current_status"] != "up":
+                        status_info["last_up"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                     current_status = "up"
                 else:
                     status_info["downtime"] += status_interval
-                    status_info["last_down"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                    if status_info["current_status"] != "down":
+                        status_info["last_down"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
                     current_status = "down"
 
                 # Check if the device is suspended
@@ -486,17 +430,15 @@ def monitor_device(stdscr):
 
                 # Get last status from database
                 last_db_status = get_last_status_from_db()
+                status_info["db_current_status"] = last_db_status if last_db_status else "unknown"
 
                 # Update status_info
                 status_info["current_status"] = current_status
-                status_info["db_current_status"] = last_db_status if last_db_status else "unknown"
 
                 # Aggregate status events only if status changes
                 if current_status != last_db_status:
                     status_events.append({"status": current_status, "timestamp": current_time})
                     last_status_written = False
-                else:
-                    status_info["status_write_info"] = "No status change; data not written."
 
                 status_check_timer = current_epoch_time
 
@@ -505,47 +447,58 @@ def monitor_device(stdscr):
                 write_status_to_influxdb()
                 last_write_time = current_epoch_time
                 last_status_written = True
+                status_info["last_db_write"] = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
             # Calculate uptime percentages over periods
             calculate_uptime_percentages()
 
             # Update the display
             stdscr.clear()
-            stdscr.addstr(0, 0, "="*80)
-            stdscr.addstr(1, 0, f"VeriNexus Monitoring System - Version {status_info['version']}".center(80))
-            stdscr.addstr(2, 0, "="*80)
+            stdscr.addstr(0, 0, f"VeriNexus Monitoring System - Version {status_info['version']}".center(80))
+            stdscr.addstr(1, 0, "="*80)
+
+            # Device Information
+            stdscr.addstr(2, 0, "Device Information:")
             stdscr.addstr(3, 0, f"MAC Address: {DEVICE_MAC}")
             stdscr.addstr(4, 0, f"External IP: {EXTERNAL_IP}")
             stdscr.addstr(5, 0, f"Local IP: {status_info['local_ip']}")
-            stdscr.addstr(6, 0, f"Uptime: {str(timedelta(seconds=status_info['uptime']))}")
-            stdscr.addstr(7, 0, f"Downtime: {str(timedelta(seconds=status_info['downtime']))}")
-            stdscr.addstr(8, 0, f"Uptime Last Hour: {status_info['uptime_percentage_hour']:.2f}%")
-            stdscr.addstr(9, 0, f"Uptime Last Day: {status_info['uptime_percentage_day']:.2f}%")
-            stdscr.addstr(10, 0, f"Uptime Last Month: {status_info['uptime_percentage_month']:.2f}%")
-            stdscr.addstr(11, 0, f"Last Up: {status_info['last_up']}")
-            stdscr.addstr(12, 0, f"Last Down: {status_info['last_down']}")
-            stdscr.addstr(13, 0, f"Last DB Write: {status_info['last_db_write']}")
-            stdscr.addstr(14, 0, f"Last Write Status: {status_info['last_write_status']}")
-            stdscr.addstr(15, 0, f"Status Write Info: {status_info['status_write_info']}")
-            stdscr.addstr(16, 0, f"Current Status: {status_info['current_status']}")
-            stdscr.addstr(17, 0, f"DB Status: {status_info['db_current_status']}")
-            stdscr.addstr(18, 0, f"Suspended: {'Yes' if status_info['is_suspended'] else 'No'}")
-            stdscr.addstr(19, 0, f"Next Keepalive Write In: {status_info['next_keepalive_in']}s")
-            stdscr.addstr(20, 0, f"Next DB Write In: {status_info['next_db_write_in']}s")
-            stdscr.addstr(21, 0, f"Next Status Check In: {status_info['next_status_check_in']}s")
-            stdscr.addstr(22, 0, "="*80)
-            stdscr.addstr(23, 0, "Settings:")
+            stdscr.addstr(6, 0, f"Suspended: {'Yes' if status_info['is_suspended'] else 'No'}")
+
+            # Uptime and Downtime
+            stdscr.addstr(8, 0, "Uptime and Downtime:")
+            stdscr.addstr(9, 0, f"Uptime: {str(timedelta(seconds=status_info['uptime']))}")
+            stdscr.addstr(10, 0, f"Downtime: {str(timedelta(seconds=status_info['downtime']))}")
+            stdscr.addstr(11, 0, f"Uptime Last Hour: {status_info['uptime_percentage_hour']:.2f}%")
+            stdscr.addstr(12, 0, f"Uptime Last Day: {status_info['uptime_percentage_day']:.2f}%")
+            stdscr.addstr(13, 0, f"Uptime Last Month: {status_info['uptime_percentage_month']:.2f}%")
+            stdscr.addstr(14, 0, f"Last Up: {status_info['last_up']}")
+            stdscr.addstr(15, 0, f"Last Down: {status_info['last_down']}")
+
+            # Database Information
+            stdscr.addstr(17, 0, "Database Information:")
+            stdscr.addstr(18, 0, f"Last DB Write: {status_info['last_db_write']}")
+            stdscr.addstr(19, 0, f"Last Write Status: {status_info['last_write_status']}")
+
+            # Timers
+            stdscr.addstr(21, 0, "Timers:")
+            stdscr.addstr(22, 0, f"Next Keepalive Write: {status_info['next_keepalive_in']}s")
+            stdscr.addstr(23, 0, f"Next DB Write: {status_info['next_db_write_in']}s")
+            stdscr.addstr(24, 0, f"Next Status Check: {status_info['next_status_check_in']}s")
+
+            # Relevant Settings
+            stdscr.addstr(26, 0, "Relevant Settings:")
             settings_lines = status_info["settings_display"].split('\n')
             for idx, line in enumerate(settings_lines):
-                stdscr.addstr(24 + idx, 0, line)
-            stdscr.addstr(24 + len(settings_lines), 0, "="*80)
-            stdscr.addstr(25 + len(settings_lines), 0, "Press 'd' to simulate disconnect, 'c' to reconnect, 'q' to quit.".center(80))
+                stdscr.addstr(27 + idx, 0, line)
+
+            stdscr.addstr(27 + len(settings_lines), 0, "="*80)
+            stdscr.addstr(28 + len(settings_lines), 0, "Press 'd' to simulate disconnect, 'c' to reconnect, 'q' to quit.".center(80))
             stdscr.refresh()
 
             time.sleep(1)
         except Exception as e:
             logging.error(f"Error in monitoring loop: {e}")
-            stdscr.addstr(26 + len(settings_lines), 0, f"Error: {e}")
+            stdscr.addstr(29 + len(settings_lines), 0, f"Error: {e}")
             stdscr.refresh()
             time.sleep(1)
 
