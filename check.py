@@ -1,20 +1,21 @@
 """
 File Name: check.py
-Version: 1.3
-Date: November 10, 2024
+Version: 1.5
+Date: November 12, 2024
 Description:
     This Python script runs on the server to monitor remote nodes posting keepalive updates.
     If they are not, it will proactively mark the node as down unless it is marked as suspended.
     It writes status changes to the database only when the status changes, minimizing database writes.
     It includes a curses-based UI to enhance display and provide real-time status updates.
-    Version 1.3 aligns script settings with the InfluxDB settings measurement, replaces the hardcoded threshold with CHECKALIVE setting,
-    adds periodic status writes based on the HEARTBEAT setting, and enhances the UI with settings display and countdown timers.
+    Version 1.5 fixes the handling of suspended devices, ensuring they are listed in the UI,
+    receive "maintenance" status updates, and reorganizes the UI for better readability.
 
 Changelog:
-    Version 1.2 - Added curses-based UI to enhance display and avoid excessive scrolling.
-    Version 1.3 - Aligned script settings with settings measurement, replaced hardcoded threshold with CHECKALIVE setting,
-                  added periodic status writes based on HEARTBEAT setting, enhanced UI with settings display and countdown timers,
-                  and updated version and date.
+    Version 1.4 - Added heartbeat write confirmations in the UI, properly handled suspended devices,
+                  wrote 'maintenance' status for suspended devices, refreshed suspended devices in the UI,
+                  fixed display and logic for suspended devices with no keepalive data, and reorganized the UI.
+    Version 1.5 - Fixed retrieval of suspended devices from InfluxDB, updated keepalive checks to include
+                  suspended devices without keepalive data, corrected status updates, and tested functionality.
 """
 
 import time
@@ -53,6 +54,8 @@ settings = {}
 settings_display = ""
 next_keepalive_check_in = 0
 next_heartbeat_in = 0
+heartbeat_write_confirmations = []
+suspended_devices = {}
 
 def get_settings():
     try:
@@ -71,8 +74,10 @@ def get_settings():
                 "HEARTBEAT": "Interval for writing heartbeat status (seconds)",
                 "NTP_SERVER": "NTP server for time synchronization",
             }
+            relevant_settings = ["CHECKALIVE", "HEARTBEAT", "NTP_SERVER"]
             settings_display_lines = []
-            for k, v in settings.items():
+            for k in relevant_settings:
+                v = settings.get(k, "Not Set")
                 description = settings_descriptions.get(k, "No description available")
                 settings_display_lines.append(f"{k}: {v} ({description})")
             global settings_display
@@ -165,28 +170,37 @@ def perform_keepalive_check(threshold):
         keepalive_query = "SELECT LAST(field_mac_address) FROM keepalive GROUP BY tag_mac_address"
         keepalive_result = influx_client.query(keepalive_query)
 
-        if not keepalive_result:
-            logging.warning("No keepalive data found in the database.")
-            return
+        # Refresh suspended devices
+        refresh_suspended_devices()
 
-        # Iterate over each node
-        for series in keepalive_result.raw.get('series', []):
-            mac_address = series['tags']['tag_mac_address']
-            # Get the time from the last keepalive point
-            last_keepalive_point = series['values'][0]
-            last_keepalive_time_str = last_keepalive_point[0]
-            try:
-                # Try parsing timestamp with microseconds
-                last_keepalive_time = datetime.strptime(last_keepalive_time_str, '%Y-%m-%dT%H:%M:%S.%fZ').replace(tzinfo=timezone.utc)
-            except ValueError:
-                # Fallback to parsing without microseconds
-                last_keepalive_time = datetime.strptime(last_keepalive_time_str, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
-            time_diff = (datetime.utcnow().replace(tzinfo=timezone.utc) - last_keepalive_time).total_seconds()
+        all_devices = set(suspended_devices.keys())
 
+        if keepalive_result:
+            for series in keepalive_result.raw.get('series', []):
+                mac_address = series['tags']['tag_mac_address']
+                all_devices.add(mac_address)
+
+        # Iterate over each device
+        for mac_address in all_devices:
             # Check if the device is suspended
-            suspended_query = f"SELECT * FROM suspended_devices WHERE tag_mac_address='{mac_address}'"
-            suspended_result = influx_client.query(suspended_query)
-            is_suspended = bool(suspended_result.raw.get('series', []))
+            is_suspended = mac_address in suspended_devices
+
+            # If the device is not in keepalive, set time_diff to a large value
+            if keepalive_result and any(series['tags']['tag_mac_address'] == mac_address for series in keepalive_result.raw.get('series', [])):
+                # Device is in keepalive
+                series = next(s for s in keepalive_result.raw.get('series', []) if s['tags']['tag_mac_address'] == mac_address)
+                last_keepalive_point = series['values'][0]
+                last_keepalive_time_str = last_keepalive_point[0]
+                try:
+                    # Try parsing timestamp with microseconds
+                    last_keepalive_time = datetime.strptime(last_keepalive_time_str, '%Y-%m-%dT%H:%M:%S.%fZ').replace(tzinfo=timezone.utc)
+                except ValueError:
+                    # Fallback to parsing without microseconds
+                    last_keepalive_time = datetime.strptime(last_keepalive_time_str, '%Y-%m-%dT%H:%M:%SZ').replace(tzinfo=timezone.utc)
+                time_diff = (datetime.utcnow().replace(tzinfo=timezone.utc) - last_keepalive_time).total_seconds()
+            else:
+                # Device is not in keepalive
+                time_diff = float('inf')
 
             # Get the last known status
             status_query = f"SELECT LAST(field_status) FROM device_status WHERE tag_mac_address='{mac_address}'"
@@ -219,12 +233,10 @@ def perform_keepalive_check(threshold):
                     }
                 }]
                 influx_client.write_points(json_body)
-                info = f"Status changed to '{new_status}'"
                 node_statuses[mac_address] = new_status
                 last_status_updates[mac_address] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
                 logging.info(f"Status for {mac_address} updated to '{new_status}'.")
             else:
-                info = "No status change"
                 last_status_updates[mac_address] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
 
     except Exception as e:
@@ -233,84 +245,143 @@ def perform_keepalive_check(threshold):
 def perform_heartbeat_write():
     try:
         logging.info("Performing heartbeat write.")
-        # Get all nodes from device_status measurement
+        heartbeat_write_confirmations.clear()
+
+        # Refresh suspended devices
+        refresh_suspended_devices()
+
+        # Get all devices from suspended_devices and device_status
         device_status_query = "SELECT LAST(field_status) FROM device_status GROUP BY tag_mac_address"
         device_status_result = influx_client.query(device_status_query)
 
-        if not device_status_result:
-            logging.warning("No device status data found in the database.")
-            return
+        all_devices = set(suspended_devices.keys())
 
-        # Iterate over each node
-        for series in device_status_result.raw.get('series', []):
-            mac_address = series['tags']['tag_mac_address']
-            last_status = series['values'][0][1]
+        if device_status_result:
+            for series in device_status_result.raw.get('series', []):
+                mac_address = series['tags']['tag_mac_address']
+                all_devices.add(mac_address)
+
+        now_iso = datetime.utcnow().isoformat() + 'Z'
+
+        # Iterate over all devices
+        for mac_address in all_devices:
+            is_suspended = mac_address in suspended_devices
+
+            # Determine status
+            if is_suspended:
+                last_status = 'maintenance'
+            else:
+                last_status = node_statuses.get(mac_address, 'unknown')
+
             json_body = [{
                 "measurement": "device_status",
                 "tags": {
                     "tag_mac_address": mac_address,
                     "tag_external_ip": "unknown"
                 },
-                "time": datetime.utcnow().isoformat() + 'Z',
+                "time": now_iso,
                 "fields": {
                     "field_status": last_status
                 }
             }]
             influx_client.write_points(json_body)
+            heartbeat_write_confirmations.append({
+                "mac_address": mac_address,
+                "status": last_status,
+                "timestamp": now_iso
+            })
             logging.info(f"Heartbeat status for {mac_address} reaffirmed as '{last_status}'.")
+
     except Exception as e:
         logging.error(f"Error during heartbeat write: {e}")
 
+def refresh_suspended_devices():
+    try:
+        suspended_query = "SELECT * FROM suspended_devices"
+        suspended_result = influx_client.query(suspended_query)
+        suspended_devices.clear()
+        if suspended_result:
+            for point in suspended_result.get_points():
+                mac_address = point.get('tag_mac_address') or point.get('field_mac_address')
+                if mac_address:
+                    suspended_devices[mac_address] = 'maintenance'
+        else:
+            logging.info("No suspended devices found.")
+    except Exception as e:
+        logging.error(f"Error refreshing suspended devices: {e}")
+
 def update_ui(stdscr):
     stdscr.clear()
-    stdscr.addstr(0, 0, "="*100)
-    stdscr.addstr(1, 0, "VeriNexus Server Monitoring - Press 'q' to quit".center(100))
-    stdscr.addstr(2, 0, "="*100)
-    stdscr.addstr(3, 0, f"{'MAC Address':<20} {'Status':<15} {'Last Update':<25} {'Info':<35}")
-    stdscr.addstr(4, 0, "-"*100)
+    stdscr.addstr(0, 0, f"VeriNexus Server Monitoring - Version 1.5".center(100))
+    stdscr.addstr(1, 0, "="*100)
 
-    row = 5
+    row = 2
 
-    # Display node information
+    # Node Information
+    stdscr.addstr(row, 0, "Node Information:")
+    row += 1
+    stdscr.addstr(row, 0, f"{'MAC Address':<20} {'Status':<15} {'Last Update':<25}")
+    row += 1
+    stdscr.addstr(row, 0, "-"*60)
+    row += 1
+
     for mac_address in node_statuses.keys():
         last_status = node_statuses[mac_address]
         last_update = last_status_updates.get(mac_address, 'Unknown')
-        info = f"Last checked at {last_update}"
-        stdscr.addstr(row, 0, f"{mac_address:<20} {last_status:<15} {last_update:<25} {info:<35}")
+        stdscr.addstr(row, 0, f"{mac_address:<20} {last_status:<15} {last_update:<25}")
         row += 1
 
-    # Display suspended devices
-    suspended_query = "SELECT * FROM suspended_devices"
-    suspended_result = influx_client.query(suspended_query)
-    suspended_macs = []
-    if suspended_result:
-        for series in suspended_result.raw.get('series', []):
-            if 'tags' in series and 'tag_mac_address' in series['tags']:
-                mac_address = series['tags']['tag_mac_address']
-                suspended_macs.append(mac_address)
-
-    if suspended_macs:
-        stdscr.addstr(row + 1, 0, f"Suspended Devices:")
-        row += 2
-        for mac in suspended_macs:
-            stdscr.addstr(row, 0, f"{mac}")
+    # Suspended Devices
+    row += 1
+    stdscr.addstr(row, 0, "Suspended Devices:")
+    row += 1
+    if suspended_devices:
+        stdscr.addstr(row, 0, f"{'MAC Address':<20} {'Status':<15}")
+        row += 1
+        stdscr.addstr(row, 0, "-"*35)
+        row += 1
+        for mac_address in suspended_devices.keys():
+            stdscr.addstr(row, 0, f"{mac_address:<20} {'maintenance':<15}")
             row += 1
     else:
-        stdscr.addstr(row + 1, 0, "No Suspended Devices")
-        row += 2
+        stdscr.addstr(row, 0, "No Suspended Devices")
+        row += 1
 
-    # Display countdown timers
+    # Heartbeat Writes
+    row += 1
+    stdscr.addstr(row, 0, "Heartbeat Writes:")
+    row += 1
+    if heartbeat_write_confirmations:
+        stdscr.addstr(row, 0, f"{'MAC Address':<20} {'Status':<15} {'Timestamp':<25}")
+        row += 1
+        stdscr.addstr(row, 0, "-"*60)
+        row += 1
+        for entry in heartbeat_write_confirmations:
+            stdscr.addstr(row, 0, f"{entry['mac_address']:<20} {entry['status']:<15} {entry['timestamp']:<25}")
+            row += 1
+    else:
+        stdscr.addstr(row, 0, "No Heartbeat Writes in this interval")
+        row += 1
+
+    # Countdown Timers
+    row += 1
+    stdscr.addstr(row, 0, "Timers:")
+    row += 1
     stdscr.addstr(row, 0, f"Next Keepalive Check In: {next_keepalive_check_in} seconds")
-    stdscr.addstr(row + 1, 0, f"Next Heartbeat Write In: {next_heartbeat_in} seconds")
+    row += 1
+    stdscr.addstr(row, 0, f"Next Heartbeat Write In: {next_heartbeat_in} seconds")
+    row += 1
 
-    # Display settings
-    stdscr.addstr(row + 3, 0, "="*100)
-    stdscr.addstr(row + 4, 0, "Settings:")
+    # Settings
+    row += 1
+    stdscr.addstr(row, 0, "Relevant Settings:")
     settings_lines = settings_display.split('\n')
     for idx, line in enumerate(settings_lines):
-        stdscr.addstr(row + 5 + idx, 0, line)
-    stdscr.addstr(row + 5 + len(settings_lines), 0, "="*100)
+        stdscr.addstr(row + idx, 0, line)
+    row += len(settings_lines)
 
+    stdscr.addstr(row + 1, 0, "="*100)
+    stdscr.addstr(row + 2, 0, "Press 'q' to quit.".center(100))
     stdscr.refresh()
 
 # Function to handle clean exit
