@@ -1,5 +1,6 @@
 #!/bin/bash
 
+
 # Dependency check function
 install_if_missing() {
     if ! command -v "$1" &> /dev/null; then
