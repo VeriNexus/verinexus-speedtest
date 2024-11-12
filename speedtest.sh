@@ -1,6 +1,6 @@
 #!/bin/bash
 # File: speedtest.sh
-# Version: 3.8.1
+# Version: 3.8.2
 # Date: 12/11/2024
 
 # Description:
@@ -8,7 +8,7 @@
 # Now includes an option to flag tests as "on-demand" when triggered via MQTT.
 
 # Version number of the script
-SCRIPT_VERSION="3.8.1"
+SCRIPT_VERSION="3.8.2"
 
 # Base directory for all operations
 BASE_DIR="/VeriNexus"
@@ -510,19 +510,9 @@ perform_dhcp_test() {
         # Attempt to capture DNS from resolv.conf
         DNS=$(grep "nameserver" /etc/resolv.conf | awk '{print $2}' | tr '\n' ',' | sed 's/,$//')
 
-        # Extract lease duration from dhcp_renew.log
-        LEASE_DURATION=$(grep -oP 'renewal in\s+\K\d+' dhcp_renew.log | head -1)
-
-        if [ -z "$LEASE_DURATION" ]; then
-            LEASE_DURATION="N/A"
-            log_message "WARN" "Lease duration could not be extracted from dhcp_renew.log."
-        else
-            log_message "INFO" "Extracted lease duration: $LEASE_DURATION seconds."
-        fi
-
-        ### Extract lease duration from DHCP output (compatible across systems)
-        ##LEASE_DURATION=$(grep -oP 'expires.*in\s+\K[\d]+' dhcp_renew.log | head -1)
-        ##LEASE_DURATION=${LEASE_DURATION:-"N/A"}
+        # Extract lease duration from DHCP output (compatible across systems)
+        LEASE_DURATION=$(grep -oP 'expires.*in\s+\K[\d]+' dhcp_renew.log | head -1)
+        LEASE_DURATION=${LEASE_DURATION:-"N/A"}
 
         STATUS="pass"
     fi
