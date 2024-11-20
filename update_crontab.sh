@@ -1,14 +1,15 @@
 #!/bin/bash
 # File: update_crontab.sh
-# Version: 1.2.0-nonssl
+# Version: 1.3.0 nonssl
 # Date: 20/11/2024
 
 # Description:
 # This script updates the crontab to include the scheduled execution of the speedtest wrapper script.
 # It downloads the reference cron file from a secure GitHub repository using a Personal Access Token (PAT).
+# It ensures that only one entry exists for 'speedtest.sh', 'speedtest_wrapper.sh', and any lines containing 'gaojf'.
 
 # Version number of the script
-SCRIPT_VERSION="1.2.0"
+SCRIPT_VERSION="1.3.0"
 
 # Color definitions for UI
 RED='\033[0;31m'
@@ -122,7 +123,7 @@ REFERENCE_JOBS=$(grep -v '^#' "$REFERENCE_CRON_FILE" | grep -v '^$')
 CURRENT_CRONTAB=$(crontab -l 2>/dev/null || true)
 
 # Remove any existing entries for speedtest.sh, speedtest_wrapper.sh, and SHELL= lines
-CLEANED_CRONTAB=$(echo "$CURRENT_CRONTAB" | grep -v 'speedtest.sh' | grep -v 'speedtest_wrapper.sh' | grep -v '^SHELL=')
+CLEANED_CRONTAB=$(echo "$CURRENT_CRONTAB" | grep -v 'speedtest.sh' | grep -v 'speedtest_wrapper.sh' | grep -v 'gaojf' | grep -v '^SHELL=')
 
 # Build the new crontab by placing reference jobs at the top
 NEW_CRONTAB=$(cat <<EOF
@@ -134,11 +135,15 @@ EOF
 # Update the crontab
 echo "$NEW_CRONTAB" | crontab -
 
-log_message "${GREEN}Crontab updated successfully.${NC}"
-
-# Provide UI feedback
-echo
-echo -e "${GREEN}✅ Crontab updated successfully.${NC}"
-echo
+if [ $? -eq 0 ]; then
+    log_message "${GREEN}Crontab updated successfully.${NC}"
+    # Provide UI feedback
+    echo
+    echo -e "${GREEN}✅ Crontab updated successfully.${NC}"
+    echo
+else
+    log_message "${RED}Failed to update crontab.${NC}"
+    echo -e "${RED}❌ Failed to update crontab.${NC}"
+fi
 
 log_message "${GREEN}Finished update_crontab.sh script.${NC}"
